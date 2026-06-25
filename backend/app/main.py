@@ -58,12 +58,14 @@ app.add_middleware(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://127.0.0.1:5173"],
+    allow_origins=[settings.frontend_url, "http://127.0.0.1:5173",
+        "http://192.168.150.6:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+"""alteraçoes aqui no middleware para teste em sistemas operacionais diferentes""""
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
