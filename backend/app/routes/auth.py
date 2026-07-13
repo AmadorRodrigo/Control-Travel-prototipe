@@ -9,12 +9,13 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    get_password_hash,
     get_token_hash,
     verify_password,
 )
 from app.dependencies import enforce_rate_limit, get_current_user, get_db
-from app.models import RefreshSession, User
-from app.schemas import AuthSessionResponse, LoginRequest, UserRead
+from app.models import Passageiro, RefreshSession, User
+from app.schemas import AuthSessionResponse, FirstAccessRequest, LoginRequest, UserRead
 
 
 router = APIRouter(prefix="/api/auth", tags=["Autenticação"])
@@ -89,7 +90,10 @@ def login(
         detail="Muitas tentativas para este usuário. Aguarde um minuto e tente novamente.",
     )
 
-    user = db.query(User).filter(User.username == payload.username).first()
+    if "@" in payload.username:
+        user = db.query(User).filter(User.email == payload.username).first()
+    else:
+        user = db.query(User).filter(User.username == payload.username).first()
 
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
@@ -202,3 +206,70 @@ def logout(
 @router.get("/me", response_model=UserRead)
 def me(current_user: User = Depends(get_current_user)) -> UserRead:
     return UserRead.model_validate(current_user)
+
+
+@router.post("/setup", response_model=AuthSessionResponse)
+def first_access_setup(
+    payload: FirstAccessRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthSessionResponse:
+    client_ip = get_client_ip(request)
+    enforce_rate_limit(
+        key=f"setup:ip:{client_ip}",
+        limit=5,
+        window_seconds=60,
+        detail="Muitas tentativas de configuração. Aguarde um minuto.",
+    )
+
+    passageiro = db.query(Passageiro).filter(Passageiro.documento == payload.documento).first()
+    if not passageiro:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nenhum passageiro encontrado com este documento.",
+        )
+
+    if passageiro.linked_user_id:
+        # Account already exists — validate email matches before resetting password
+        user = db.query(User).filter(User.id == passageiro.linked_user_id).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta vinculada não encontrada.")
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário inativo.")
+        if user.email.lower() != payload.email.lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este documento já possui uma conta cadastrada. Para redefinir a senha, use o e-mail registrado nessa conta.",
+            )
+        user.password_hash = get_password_hash(payload.new_password)
+    else:
+        # No account yet — create one and link it
+        if db.query(User).filter(User.email == payload.email).first():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este e-mail já está vinculado a outra conta.",
+            )
+        # Use documento as username (unique), trim to 50 chars
+        username = payload.documento[:50]
+        if db.query(User).filter(User.username == username).first():
+            username = (payload.documento[:46] + payload.email[:3])[:50]
+
+        user = User(
+            username=username,
+            email=payload.email,
+            password_hash=get_password_hash(payload.new_password),
+            is_active=True,
+            is_admin=False,
+        )
+        db.add(user)
+        db.flush()
+        passageiro.linked_user_id = user.id
+
+    refresh_token, access_token = create_user_session(user=user, request=request, db=db)
+    db.commit()
+    set_refresh_cookie(response, refresh_token)
+    return AuthSessionResponse(
+        access_token=access_token,
+        user=UserRead.model_validate(user),
+    )

@@ -2,42 +2,59 @@ import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-const initialForm = {
-  username: "",
-  password: "",
-};
-
 function LoginPage() {
-  const { login, isAuthenticated, isLoading } = useAuth();
-  const [formData, setFormData] = useState(initialForm);
+  const { login, setup, isAuthenticated, isLoading, user } = useAuth();
+  const [mode, setMode] = useState("login"); // "login" | "setup"
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [setupForm, setSetupForm] = useState({ documento: "", email: "", new_password: "", confirm: "" });
   const [errorMessage, setErrorMessage] = useState("");
 
   if (isAuthenticated) {
-    return <Navigate to="/passageiros" replace />;
+    return <Navigate to={user?.is_admin ? "/viagens" : "/minha-poltrona"} replace />;
   }
 
-  function handleChange(event) {
-    const { name, value } = event.target;
-    setFormData((current) => ({
-      ...current,
-      [name]: value,
-    }));
+  function handleLoginChange(e) {
+    const { name, value } = e.target;
+    setLoginForm((c) => ({ ...c, [name]: value }));
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    if (isLoading) {
-      return;
-    }
+  function handleSetupChange(e) {
+    const { name, value } = e.target;
+    setSetupForm((c) => ({ ...c, [name]: value }));
+  }
 
+  async function handleLoginSubmit(e) {
+    e.preventDefault();
+    if (isLoading) return;
     setErrorMessage("");
-
     try {
-      await login(formData);
+      await login(loginForm);
     } catch (error) {
       setErrorMessage(error.message);
     }
   }
+
+  async function handleSetupSubmit(e) {
+    e.preventDefault();
+    if (isLoading) return;
+    if (setupForm.new_password !== setupForm.confirm) {
+      setErrorMessage("As senhas não conferem.");
+      return;
+    }
+    setErrorMessage("");
+    try {
+      await setup({
+        documento: setupForm.documento,
+        email: setupForm.email,
+        new_password: setupForm.new_password,
+      });
+    } catch (error) {
+      setErrorMessage(error.message);
+    }
+  }
+
+  const inputClass =
+    "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100";
 
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-6 sm:px-6 lg:px-8">
@@ -62,23 +79,15 @@ function LoginPage() {
 
             <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-wide text-blue-100">
-                  Segurança
-                </p>
+                <p className="text-xs uppercase tracking-wide text-blue-100">Segurança</p>
                 <p className="mt-2 text-sm font-medium">JWT + hash bcrypt</p>
               </div>
               <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-wide text-blue-100">
-                  Assentos
-                </p>
-                <p className="mt-2 text-sm font-medium">
-                  Poltrona por número e andar
-                </p>
+                <p className="text-xs uppercase tracking-wide text-blue-100">Assentos</p>
+                <p className="mt-2 text-sm font-medium">Poltrona por número e andar</p>
               </div>
               <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-wide text-blue-100">
-                  Operação
-                </p>
+                <p className="text-xs uppercase tracking-wide text-blue-100">Operação</p>
                 <p className="mt-2 text-sm font-medium">Cadastro sem venda</p>
               </div>
             </div>
@@ -86,67 +95,172 @@ function LoginPage() {
 
           <section className="p-5 sm:p-8">
             <div className="mx-auto flex min-h-full max-w-md flex-col justify-center">
-              <div className="mb-8">
-                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-600">
-                  Entrar
-                </p>
-                <h2 className="mt-2 text-2xl font-bold text-slate-900">
-                  Acesse sua conta
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Interface otimizada para Android e iPhone, priorizando leitura
-                  rápida e toque confortável.
-                </p>
-              </div>
-
-              <form className="space-y-4" onSubmit={handleSubmit}>
-                <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Usuário</span>
-                  <input
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                    type="text"
-                    name="username"
-                    autoComplete="username"
-                    placeholder="Digite seu usuário"
-                    value={formData.username}
-                    onChange={handleChange}
-                    required
-                  />
-                </label>
-
-                <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Senha</span>
-                  <input
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                    type="password"
-                    name="password"
-                    autoComplete="current-password"
-                    placeholder="Digite sua senha"
-                    value={formData.password}
-                    onChange={handleChange}
-                    required
-                  />
-                </label>
-
-                {errorMessage ? (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {errorMessage}
-                  </div>
-                ) : null}
-
+              {/* Mode toggle */}
+              <div className="mb-6 flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
                 <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="flex w-full items-center justify-center rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  onClick={() => { setMode("login"); setErrorMessage(""); }}
+                  className={`flex-1 rounded-xl py-2 text-sm font-semibold transition ${
+                    mode === "login"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
                 >
-                  {isLoading ? "Entrando..." : "Entrar"}
+                  Entrar
                 </button>
-              </form>
-
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                Use as credenciais padrão definidas no `.env` para o primeiro
-                acesso.
+                <button
+                  type="button"
+                  onClick={() => { setMode("setup"); setErrorMessage(""); }}
+                  className={`flex-1 rounded-xl py-2 text-sm font-semibold transition ${
+                    mode === "setup"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Primeiro acesso
+                </button>
               </div>
+
+              {mode === "login" ? (
+                <>
+                  <div className="mb-6">
+                    <h2 className="text-2xl font-bold text-slate-900">Acesse sua conta</h2>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Use seu usuário ou e-mail cadastrado.
+                    </p>
+                  </div>
+
+                  <form className="space-y-4" onSubmit={handleLoginSubmit}>
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-slate-700">Usuário ou e-mail</span>
+                      <input
+                        className={inputClass}
+                        type="text"
+                        name="username"
+                        autoComplete="username"
+                        placeholder="Digite seu usuário ou e-mail"
+                        value={loginForm.username}
+                        onChange={handleLoginChange}
+                        required
+                      />
+                    </label>
+
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-slate-700">Senha</span>
+                      <input
+                        className={inputClass}
+                        type="password"
+                        name="password"
+                        autoComplete="current-password"
+                        placeholder="Digite sua senha"
+                        value={loginForm.password}
+                        onChange={handleLoginChange}
+                        required
+                      />
+                    </label>
+
+                    {errorMessage ? (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {errorMessage}
+                      </div>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex w-full items-center justify-center rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {isLoading ? "Entrando..." : "Entrar"}
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <>
+                  <div className="mb-6">
+                    <h2 className="text-2xl font-bold text-slate-900">Primeiro acesso</h2>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Informe seu documento (RG, CPF ou passaporte) cadastrado pelo administrador, seu e-mail e defina uma senha. Após confirmar, você verá sua poltrona e viagem.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Já possui conta? Use este formulário com o e-mail cadastrado para redefinir sua senha.
+                    </p>
+                  </div>
+
+                  <form className="space-y-4" onSubmit={handleSetupSubmit}>
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-slate-700">Documento (RG, CPF ou passaporte)</span>
+                      <input
+                        className={inputClass}
+                        type="text"
+                        name="documento"
+                        autoComplete="off"
+                        placeholder="Número do documento cadastrado"
+                        value={setupForm.documento}
+                        onChange={handleSetupChange}
+                        required
+                      />
+                    </label>
+
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-slate-700">Seu e-mail</span>
+                      <input
+                        className={inputClass}
+                        type="email"
+                        name="email"
+                        autoComplete="email"
+                        placeholder="seu@email.com"
+                        value={setupForm.email}
+                        onChange={handleSetupChange}
+                        required
+                      />
+                    </label>
+
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-slate-700">Nova senha</span>
+                      <input
+                        className={inputClass}
+                        type="password"
+                        name="new_password"
+                        autoComplete="new-password"
+                        placeholder="Mínimo 6 caracteres"
+                        value={setupForm.new_password}
+                        onChange={handleSetupChange}
+                        required
+                        minLength={6}
+                      />
+                    </label>
+
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-slate-700">Confirmar senha</span>
+                      <input
+                        className={inputClass}
+                        type="password"
+                        name="confirm"
+                        autoComplete="new-password"
+                        placeholder="Repita a senha"
+                        value={setupForm.confirm}
+                        onChange={handleSetupChange}
+                        required
+                        minLength={6}
+                      />
+                    </label>
+
+                    {errorMessage ? (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {errorMessage}
+                      </div>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex w-full items-center justify-center rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {isLoading ? "Salvando..." : "Definir senha e entrar"}
+                    </button>
+                  </form>
+                </>
+              )}
             </div>
           </section>
         </div>
