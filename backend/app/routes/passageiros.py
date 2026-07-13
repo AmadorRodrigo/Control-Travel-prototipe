@@ -16,7 +16,7 @@ from app.dependencies import (
     get_db,
 )
 from app.models import IdempotencyKey, Passageiro, User
-from app.schemas import PassageiroCreate, PassageiroListResponse, PassageiroRead, PaginationMeta
+from app.schemas import PassageiroCreate, PassageiroListResponse, PassageiroRead, PassageiroUpdate, PaginationMeta
 
 
 router = APIRouter(prefix="/api/passageiros", tags=["Passageiros"])
@@ -185,3 +185,96 @@ def criar_passageiro(
 
     db.refresh(passageiro)
     return passageiro
+
+
+@router.get("/{passageiro_id}", response_model=PassageiroRead)
+def obter_passageiro(
+    passageiro_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PassageiroRead:
+    enforce_authenticated_read_rate_limit(request, current_user)
+
+    passageiro = (
+        db.query(Passageiro)
+        .filter(
+            Passageiro.id == passageiro_id,
+            Passageiro.criado_por_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not passageiro:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passageiro não encontrado.")
+
+    return passageiro
+
+
+@router.put("/{passageiro_id}", response_model=PassageiroRead)
+def atualizar_passageiro(
+    passageiro_id: int,
+    payload: PassageiroUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PassageiroRead:
+    enforce_authenticated_write_rate_limit(request, current_user)
+
+    passageiro = (
+        db.query(Passageiro)
+        .filter(
+            Passageiro.id == passageiro_id,
+            Passageiro.criado_por_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not passageiro:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passageiro não encontrado.")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Nenhum campo para atualizar.")
+
+    if "documento" in updates and updates["documento"] != passageiro.documento:
+        conflito = (
+            db.query(Passageiro)
+            .filter(
+                Passageiro.documento == updates["documento"],
+                Passageiro.id != passageiro_id,
+            )
+            .first()
+        )
+        if conflito:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Já existe um passageiro com este documento.")
+
+    for field, value in updates.items():
+        setattr(passageiro, field, value)
+
+    db.commit()
+    db.refresh(passageiro)
+    return passageiro
+
+
+@router.delete("/{passageiro_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_passageiro(
+    passageiro_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    enforce_authenticated_write_rate_limit(request, current_user)
+
+    passageiro = (
+        db.query(Passageiro)
+        .filter(
+            Passageiro.id == passageiro_id,
+            Passageiro.criado_por_user_id == current_user.id,
+        )
+        .first()
+    )
+    if not passageiro:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passageiro não encontrado.")
+
+    db.query(IdempotencyKey).filter(IdempotencyKey.passageiro_id == passageiro_id).delete()
+    db.delete(passageiro)
+    db.commit()
