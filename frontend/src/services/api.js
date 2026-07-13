@@ -141,6 +141,17 @@ export async function loginRequest(payload) {
   return response;
 }
 
+export async function setupRequest(payload) {
+  const response = await request("/api/auth/setup", {
+    method: "POST",
+    includeAuth: false,
+    retryOnAuth: false,
+    body: JSON.stringify(payload),
+  });
+  setStoredAccessToken(response.access_token);
+  return response;
+}
+
 export async function logoutRequest() {
   try {
     await request("/api/auth/logout", {
@@ -171,6 +182,45 @@ export async function createPassenger(payload, idempotencyKey) {
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function getUsers() {
+  return request("/api/users", { method: "GET" });
+}
+
+export async function createUser(payload) {
+  return request("/api/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateUser(id, payload) {
+  return request(`/api/users/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteUser(id) {
+  return request(`/api/users/${id}`, { method: "DELETE" });
+}
+
+export async function getMySeats() {
+  return request("/api/me/poltrona", { method: "GET" });
+}
+
+export async function updatePassenger(id, payload) {
+  return request(`/api/passageiros/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deletePassenger(id) {
+  return request(`/api/passageiros/${id}`, {
+    method: "DELETE",
   });
 }
 

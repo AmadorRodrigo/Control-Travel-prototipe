@@ -1,5 +1,12 @@
-import { useEffect, useState } from "react";
-import { createPassenger, getPassengers } from "../services/api";
+import { useEffect, useRef, useState } from "react";
+import {
+  createPassenger,
+  deletePassenger,
+  getPassengers,
+  getUsers,
+  updatePassenger,
+} from "../services/api";
+import { generateUUID } from "../utils/uuid";
 import AppHeader from "../components/AppHeader";
 
 const initialForm = {
@@ -8,6 +15,7 @@ const initialForm = {
   data_nascimento: "",
   telefone: "",
   contato_emergencia: "",
+  linked_user_id: "",
 };
 
 function PassengersPage() {
@@ -24,15 +32,33 @@ function PassengersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [editingPassenger, setEditingPassenger] = useState(null);
+  const [isDeletingId, setIsDeletingId] = useState(null);
+  const [users, setUsers] = useState([]);
+  const menuRefs = useRef({});
+
+  useEffect(() => {
+    function handleOutsideClick(event) {
+      if (openMenuId === null) return;
+      const menuEl = menuRefs.current[openMenuId];
+      if (menuEl && !menuEl.contains(event.target)) {
+        setOpenMenuId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [openMenuId]);
+
+  useEffect(() => {
+    getUsers().then((data) => setUsers(data.items)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     async function loadPassengers() {
       setIsLoading(true);
       try {
-        const data = await getPassengers({
-          page,
-          page_size: pageSize,
-        });
+        const data = await getPassengers({ page, page_size: pageSize });
         setPassengers(data.items);
         setPagination(data.pagination);
       } catch (error) {
@@ -41,43 +67,87 @@ function PassengersPage() {
         setIsLoading(false);
       }
     }
-
     loadPassengers();
   }, [page, pageSize]);
 
+  async function refreshList(targetPage = page) {
+    const data = await getPassengers({ page: targetPage, page_size: pageSize });
+    setPassengers(data.items);
+    setPagination(data.pagination);
+  }
+
   function handleChange(event) {
     const { name, value } = event.target;
-    setFormData((current) => ({
-      ...current,
-      [name]: value,
-    }));
+    setFormData((current) => ({ ...current, [name]: value }));
+  }
+
+  function startEdit(passenger) {
+    setEditingPassenger(passenger);
+    setFormData({
+      nome: passenger.nome,
+      documento: passenger.documento,
+      data_nascimento: passenger.data_nascimento,
+      telefone: passenger.telefone,
+      contato_emergencia: passenger.contato_emergencia,
+      linked_user_id: passenger.linked_user_id ?? "",
+    });
+    setOpenMenuId(null);
+    setErrorMessage("");
+  }
+
+  function cancelEdit() {
+    setEditingPassenger(null);
+    setFormData(initialForm);
+    setErrorMessage("");
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (isSubmitting) {
-      return;
-    }
-
+    if (isSubmitting) return;
     setIsSubmitting(true);
     setErrorMessage("");
-
     try {
-      const idempotencyKey = crypto.randomUUID();
-      await createPassenger(formData, idempotencyKey);
-      setFormData(initialForm);
-      setPage(1);
-
-      const data = await getPassengers({
-        page: 1,
-        page_size: pageSize,
-      });
-      setPassengers(data.items);
-      setPagination(data.pagination);
+      if (editingPassenger) {
+        const payload = {
+          ...formData,
+          linked_user_id: formData.linked_user_id ? Number(formData.linked_user_id) : null,
+        };
+        await updatePassenger(editingPassenger.id, payload);
+        setEditingPassenger(null);
+        setFormData(initialForm);
+        await refreshList();
+      } else {
+        const idempotencyKey = generateUUID();
+        await createPassenger(formData, idempotencyKey);
+        setFormData(initialForm);
+        setPage(1);
+        await refreshList(1);
+      }
     } catch (error) {
       setErrorMessage(error.message);
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (isDeletingId) return;
+    setIsDeletingId(id);
+    setOpenMenuId(null);
+    setErrorMessage("");
+    try {
+      await deletePassenger(id);
+      const nextPage =
+        passengers.length === 1 && page > 1 ? page - 1 : page;
+      if (nextPage !== page) {
+        setPage(nextPage);
+      } else {
+        await refreshList(nextPage);
+      }
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsDeletingId(null);
     }
   }
 
@@ -131,9 +201,51 @@ function PassengersPage() {
                           Documento: {passenger.documento}
                         </p>
                       </div>
-                      <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-                        #{passenger.id}
-                      </span>
+
+                      <div
+                        className="relative"
+                        ref={(el) => {
+                          if (el) menuRefs.current[passenger.id] = el;
+                          else delete menuRefs.current[passenger.id];
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenMenuId(
+                              openMenuId === passenger.id ? null : passenger.id
+                            )
+                          }
+                          className="flex flex-col items-center justify-center gap-[4px] rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                          aria-label="Ações do passageiro"
+                        >
+                          <span className="block h-[2px] w-4 rounded bg-current" />
+                          <span className="block h-[2px] w-4 rounded bg-current" />
+                          <span className="block h-[2px] w-4 rounded bg-current" />
+                        </button>
+
+                        {openMenuId === passenger.id ? (
+                          <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-2xl border border-slate-200 bg-white py-1 shadow-lg">
+                            <button
+                              type="button"
+                              onClick={() => startEdit(passenger)}
+                              className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(passenger.id)}
+                              disabled={isDeletingId === passenger.id}
+                              className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              {isDeletingId === passenger.id
+                                ? "Excluindo..."
+                                : "Excluir"}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 gap-2 text-sm text-slate-600 sm:grid-cols-2">
@@ -159,7 +271,8 @@ function PassengersPage() {
               </button>
 
               <span className="text-sm text-slate-500">
-                Página {pagination.page} de {Math.max(1, pagination.total_pages)}
+                Página {pagination.page} de{" "}
+                {Math.max(1, pagination.total_pages)}
               </span>
 
               <button
@@ -186,10 +299,12 @@ function PassengersPage() {
           <article className="rounded-3xl bg-white p-5 shadow-card">
             <div className="mb-4">
               <h2 className="text-lg font-semibold text-slate-900">
-                Novo passageiro
+                {editingPassenger ? "Editar passageiro" : "Novo passageiro"}
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Formulário preparado para coleta completa dos dados do viajante.
+                {editingPassenger
+                  ? `Alterando dados de ${editingPassenger.nome}.`
+                  : "Formulário preparado para coleta completa dos dados do viajante."}
               </p>
             </div>
 
@@ -239,13 +354,45 @@ function PassengersPage() {
                 required
               />
 
+              {editingPassenger ? (
+                <select
+                  name="linked_user_id"
+                  value={formData.linked_user_id}
+                  onChange={handleChange}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
+                >
+                  <option value="">Sem vínculo com usuário</option>
+                  {users
+                    .filter((u) => !u.is_admin)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.username} ({u.email})
+                      </option>
+                    ))}
+                </select>
+              ) : null}
+
               <button
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isSubmitting ? "Salvando..." : "Cadastrar passageiro"}
+                {isSubmitting
+                  ? "Salvando..."
+                  : editingPassenger
+                  ? "Salvar alterações"
+                  : "Cadastrar passageiro"}
               </button>
+
+              {editingPassenger ? (
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+              ) : null}
             </form>
           </article>
         </section>

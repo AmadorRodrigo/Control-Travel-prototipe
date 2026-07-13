@@ -16,35 +16,77 @@ function AppHeader({ title, description }) {
           {user ? (
             <p className="mt-2 text-xs uppercase tracking-wide text-slate-400">
               Sessão ativa: {user.username}
+              {user.is_admin ? " · Admin" : ""}
             </p>
           ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <NavLink
-            to="/viagens"
-            className={({ isActive }) =>
-              `rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                isActive
-                  ? "bg-slate-950 text-white"
-                  : "border border-slate-200 text-slate-700 hover:bg-slate-50"
-              }`
-            }
-          >
-            Viagens
-          </NavLink>
-          <NavLink
-            to="/passageiros"
-            className={({ isActive }) =>
-              `rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                isActive
-                  ? "bg-slate-950 text-white"
-                  : "border border-slate-200 text-slate-700 hover:bg-slate-50"
-              }`
-            }
-          >
-            Passageiros
-          </NavLink>
+          {user?.is_admin ? (
+            <>
+              <NavLink
+                to="/viagens"
+                className={({ isActive }) =>
+                  `rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                    isActive
+                      ? "bg-slate-950 text-white"
+                      : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`
+                }
+              >
+                Viagens
+              </NavLink>
+              <NavLink
+                to="/passageiros"
+                className={({ isActive }) =>
+                  `rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                    isActive
+                      ? "bg-slate-950 text-white"
+                      : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`
+                }
+              >
+                Passageiros
+              </NavLink>
+              <NavLink
+                to="/usuarios"
+                className={({ isActive }) =>
+                  `rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                    isActive
+                      ? "bg-slate-950 text-white"
+                      : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`
+                }
+              >
+                Usuários
+              </NavLink>
+              <NavLink
+                to="/vinculos"
+                className={({ isActive }) =>
+                  `rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                    isActive
+                      ? "bg-slate-950 text-white"
+                      : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  }`
+                }
+              >
+                Vínculos
+              </NavLink>
+            </>
+          ) : (
+            <NavLink
+              to="/minha-poltrona"
+              className={({ isActive }) =>
+                `rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                  isActive
+                    ? "bg-slate-950 text-white"
+                    : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                }`
+              }
+            >
+              Minha Poltrona
+            </NavLink>
+          )}
           <button
             type="button"
             onClick={logout}
