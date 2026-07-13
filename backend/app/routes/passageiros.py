@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.dependencies import (
@@ -49,6 +49,7 @@ def listar_passageiros(
 
     query = (
         db.query(Passageiro)
+        .options(joinedload(Passageiro.linked_user))
         .filter(Passageiro.criado_por_user_id == current_user.id)
         .order_by(Passageiro.nome.asc())
     )
@@ -198,6 +199,7 @@ def obter_passageiro(
 
     passageiro = (
         db.query(Passageiro)
+        .options(joinedload(Passageiro.linked_user))
         .filter(
             Passageiro.id == passageiro_id,
             Passageiro.criado_por_user_id == current_user.id,
@@ -222,6 +224,7 @@ def atualizar_passageiro(
 
     passageiro = (
         db.query(Passageiro)
+        .options(joinedload(Passageiro.linked_user))
         .filter(
             Passageiro.id == passageiro_id,
             Passageiro.criado_por_user_id == current_user.id,
@@ -234,6 +237,11 @@ def atualizar_passageiro(
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Nenhum campo para atualizar.")
+
+    if "linked_user_id" in updates and updates["linked_user_id"] is not None:
+        linked_user = db.query(User).filter(User.id == updates["linked_user_id"]).first()
+        if not linked_user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     if "documento" in updates and updates["documento"] != passageiro.documento:
         conflito = (

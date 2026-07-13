@@ -8,9 +8,30 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class LoginRequest(BaseModel):
+class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=50)
+    email: EmailStr
     password: str = Field(min_length=6, max_length=128)
+    is_admin: bool = False
+
+
+class UserUpdate(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=50)
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=6, max_length=128)
+    is_active: bool | None = None
+    is_admin: bool | None = None
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=6, max_length=128)
+
+
+class FirstAccessRequest(BaseModel):
+    documento: str = Field(min_length=5, max_length=50)
+    email: EmailStr
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class UserRead(BaseModel):
@@ -20,6 +41,11 @@ class UserRead(BaseModel):
     username: str
     email: EmailStr
     is_active: bool
+    is_admin: bool
+
+
+class UserListResponse(BaseModel):
+    items: list[UserRead]
 
 
 class AuthSessionResponse(TokenResponse):
@@ -38,11 +64,22 @@ class PassageiroCreate(PassageiroBase):
     pass
 
 
+class PassageiroUpdate(BaseModel):
+    nome: str | None = Field(default=None, min_length=3, max_length=150)
+    documento: str | None = Field(default=None, min_length=5, max_length=50)
+    data_nascimento: date | None = None
+    telefone: str | None = Field(default=None, min_length=8, max_length=30)
+    contato_emergencia: str | None = Field(default=None, min_length=3, max_length=150)
+    linked_user_id: int | None = None
+
+
 class PassageiroRead(PassageiroBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     criado_por_user_id: int
+    linked_user_id: int | None = None
+    linked_user: "UserRead | None" = None
 
 
 class PaginationMeta(BaseModel):
@@ -105,3 +142,19 @@ class ViagemRead(ViagemBase):
 class ViagemListResponse(BaseModel):
     items: list[ViagemRead]
     pagination: PaginationMeta
+
+
+class AssentoComViagemRead(AssentoBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    viagem_id: int
+    passageiro_id: int | None
+    ocupado: bool
+    reservado_em: datetime | None
+    viagem: ViagemRead
+
+
+class MinhaPoltronaResponse(BaseModel):
+    passageiro: PassageiroRead
+    assentos: list[AssentoComViagemRead]
