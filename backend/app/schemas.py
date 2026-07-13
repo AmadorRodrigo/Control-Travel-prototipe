@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -12,7 +13,7 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
-    is_admin: bool = False
+    # is_admin intentionally omitted — admin status is set only via PUT by an existing admin
 
 
 class UserUpdate(BaseModel):
@@ -121,7 +122,7 @@ class ViagemBase(BaseModel):
     origem: str = Field(min_length=2, max_length=120)
     destino: str = Field(min_length=2, max_length=120)
     data_partida: datetime
-    status: str = Field(default="planejada", min_length=3, max_length=30)
+    status: Literal["planejada", "em_andamento", "concluida", "cancelada"] = "planejada"
     capacidade_andar_inferior: int = Field(default=0, ge=0, le=80)
     capacidade_andar_superior: int = Field(default=0, ge=0, le=80)
     observacoes: str | None = Field(default=None, max_length=1000)

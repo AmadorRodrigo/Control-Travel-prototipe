@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Annotated
@@ -20,6 +21,19 @@ from app.schemas import PassageiroCreate, PassageiroListResponse, PassageiroRead
 
 
 router = APIRouter(prefix="/api/passageiros", tags=["Passageiros"])
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _validate_idempotency_key(key: str | None) -> None:
+    if key and not _UUID_RE.match(key):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Idempotency-Key deve ser um UUID v4 válido.",
+        )
 
 
 def build_passageiro_request_hash(payload: PassageiroCreate) -> str:
@@ -79,6 +93,7 @@ def criar_passageiro(
     db: Session = Depends(get_db),
 ) -> PassageiroRead:
     enforce_authenticated_write_rate_limit(request, current_user)
+    _validate_idempotency_key(idempotency_key)
 
     active_idempotency_record = None
     payload_hash = build_passageiro_request_hash(payload)

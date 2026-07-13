@@ -3,32 +3,46 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from jose import JWTError, jwt
+import jwt
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_ph = PasswordHasher(time_cost=2, memory_cost=65536, parallelism=2)
 
-
-def _prehash_password(password: str) -> str:
-    # bcrypt truncates at 72 bytes; SHA-256 digest fits in 64 hex chars (well under limit)
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+# Legacy bcrypt verifier — used only to verify existing hashes during migration.
+# New passwords are always hashed with argon2.
+_bcrypt_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(_prehash_password(plain_password), hashed_password)
+    if hashed_password.startswith("$argon2"):
+        try:
+            return _ph.verify(hashed_password, plain_password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            return False
+    # Legacy bcrypt hash (starts with $2b$ or $2a$)
+    try:
+        return _bcrypt_ctx.verify(
+            hashlib.sha256(plain_password.encode("utf-8")).hexdigest(),
+            hashed_password,
+        )
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(_prehash_password(password))
+    return _ph.hash(password)
 
 
 def create_access_token(
     *,
     subject: str,
     username: str,
+    token_version: int = 0,
     expires_delta: timedelta | None = None,
 ) -> str:
     expire_at = datetime.now(timezone.utc) + (
@@ -38,6 +52,7 @@ def create_access_token(
         "sub": subject,
         "username": username,
         "type": "access",
+        "ver": token_version,
         "exp": expire_at,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
@@ -71,11 +86,3 @@ def decode_token(token: str) -> dict[str, Any]:
 
 def get_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def is_token_invalid(token: str) -> bool:
-    try:
-        decode_token(token)
-        return False
-    except JWTError:
-        return True

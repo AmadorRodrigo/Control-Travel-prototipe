@@ -20,6 +20,10 @@ from app.schemas import AuthSessionResponse, FirstAccessRequest, LoginRequest, U
 
 router = APIRouter(prefix="/api/auth", tags=["Autenticação"])
 
+# Dummy hash used to prevent timing side-channel when user is not found.
+# Verification will always fail, but takes the same time as a real check.
+_DUMMY_HASH = get_password_hash("dummy-constant-time-placeholder")
+
 
 def set_refresh_cookie(response: Response, refresh_token: str) -> None:
     response.set_cookie(
@@ -45,12 +49,32 @@ def clear_refresh_cookie(response: Response) -> None:
     )
 
 
+def _revoke_excess_sessions(user_id: int, db: Session) -> None:
+    now = datetime.now(timezone.utc)
+    active_sessions = (
+        db.query(RefreshSession)
+        .filter(
+            RefreshSession.user_id == user_id,
+            RefreshSession.revoked_at.is_(None),
+            RefreshSession.expires_at > now,
+        )
+        .order_by(RefreshSession.created_at.asc())
+        .all()
+    )
+    excess = len(active_sessions) - settings.max_sessions_per_user + 1
+    if excess > 0:
+        for old_session in active_sessions[:excess]:
+            old_session.revoked_at = now
+
+
 def create_user_session(
     *,
     user: User,
     request: Request,
     db: Session,
 ) -> tuple[str, str]:
+    _revoke_excess_sessions(user.id, db)
+
     refresh_token, refresh_jti, refresh_expires_at = create_refresh_token(
         subject=str(user.id),
         username=user.username,
@@ -64,7 +88,13 @@ def create_user_session(
         expires_at=refresh_expires_at,
     )
     db.add(session)
-    return refresh_token, create_access_token(subject=str(user.id), username=user.username)
+
+    access_token = create_access_token(
+        subject=str(user.id),
+        username=user.username,
+        token_version=user.token_version,
+    )
+    return refresh_token, access_token
 
 
 @router.post("/login", response_model=AuthSessionResponse)
@@ -95,7 +125,11 @@ def login(
     else:
         user = db.query(User).filter(User.username == payload.username).first()
 
-    if not user or not verify_password(payload.password, user.password_hash):
+    # Always run password verification to prevent timing-based user enumeration
+    candidate_hash = user.password_hash if user else _DUMMY_HASH
+    password_ok = verify_password(payload.password, candidate_hash)
+
+    if not user or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos.",
@@ -218,31 +252,39 @@ def first_access_setup(
     client_ip = get_client_ip(request)
     enforce_rate_limit(
         key=f"setup:ip:{client_ip}",
-        limit=5,
+        limit=settings.setup_rate_limit_per_minute,
         window_seconds=60,
         detail="Muitas tentativas de configuração. Aguarde um minuto.",
+    )
+    enforce_rate_limit(
+        key=f"setup:doc:{payload.documento}",
+        limit=settings.setup_rate_limit_per_minute,
+        window_seconds=60,
+        detail="Muitas tentativas para este documento. Aguarde um minuto.",
+    )
+
+    # Use a generic error for both "document not found" and "wrong email on existing account"
+    # to prevent document enumeration.
+    _invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Credenciais inválidas. Verifique o documento e o e-mail informados.",
     )
 
     passageiro = db.query(Passageiro).filter(Passageiro.documento == payload.documento).first()
     if not passageiro:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Nenhum passageiro encontrado com este documento.",
-        )
+        # Perform a dummy verify to keep response time consistent
+        verify_password("dummy", _DUMMY_HASH)
+        raise _invalid
 
     if passageiro.linked_user_id:
         # Account already exists — validate email matches before resetting password
         user = db.query(User).filter(User.id == passageiro.linked_user_id).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conta vinculada não encontrada.")
-        if not user.is_active:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário inativo.")
+        if not user or not user.is_active:
+            raise _invalid
         if user.email.lower() != payload.email.lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Este documento já possui uma conta cadastrada. Para redefinir a senha, use o e-mail registrado nessa conta.",
-            )
+            raise _invalid
         user.password_hash = get_password_hash(payload.new_password)
+        user.token_version = (user.token_version + 1) % 2_147_483_647
     else:
         # No account yet — create one and link it
         if db.query(User).filter(User.email == payload.email).first():
@@ -250,7 +292,6 @@ def first_access_setup(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Este e-mail já está vinculado a outra conta.",
             )
-        # Use documento as username (unique), trim to 50 chars
         username = payload.documento[:50]
         if db.query(User).filter(User.username == username).first():
             username = (payload.documento[:46] + payload.email[:3])[:50]

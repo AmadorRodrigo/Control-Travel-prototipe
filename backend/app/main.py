@@ -7,12 +7,14 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.core.config import settings, validate_settings
 from app.core.database import engine
 from app.core.security import get_password_hash
 from app.models import User
 from app.routes.auth import router as auth_router
+from app.routes.me import router as me_router
 from app.routes.passageiros import router as passageiros_router
+from app.routes.users import router as users_router
 from app.routes.viagens import router as viagens_router
 
 
@@ -24,6 +26,9 @@ def seed_default_admin() -> None:
             .first()
         )
         if existing_admin:
+            if not existing_admin.is_admin:
+                existing_admin.is_admin = True
+                session.commit()
             return
 
         admin = User(
@@ -31,6 +36,7 @@ def seed_default_admin() -> None:
             email=settings.default_admin_email,
             password_hash=get_password_hash(settings.default_admin_password),
             is_active=True,
+            is_admin=True,
         )
         session.add(admin)
         session.commit()
@@ -38,6 +44,7 @@ def seed_default_admin() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    validate_settings()
     seed_default_admin()
     yield
 
@@ -58,14 +65,12 @@ app.add_middleware(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://127.0.0.1:5173",
-        "http://192.168.150.6:5173",
-    ],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
-"""alteraçoes aqui no middleware para teste em sistemas operacionais diferentes""""
+
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
@@ -74,17 +79,28 @@ async def add_security_headers(request: Request, call_next) -> Response:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    if settings.app_env == "production":
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=63072000; includeSubDomains; preload"
+        )
     return response
 
 
 app.include_router(auth_router)
+app.include_router(me_router)
 app.include_router(passageiros_router)
+app.include_router(users_router)
 app.include_router(viagens_router)
 
 
 @app.get("/health", tags=["Health"])
 def health_check():
-    return {
-        "status": "ok",
-        "environment": settings.app_env,
-    }
+    return {"status": "ok"}
