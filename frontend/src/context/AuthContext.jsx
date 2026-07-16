@@ -6,7 +6,6 @@ import {
   loginRequest,
   logoutRequest,
   registerAuthChangeListener,
-  setupRequest,
 } from "../services/api";
 
 const AuthContext = createContext(null);
@@ -53,19 +52,7 @@ export function AuthProvider({ children }) {
       const response = await loginRequest(credentials);
       setToken(response.access_token);
       setUser(response.user);
-      navigate(response.user.is_admin ? "/viagens" : "/minha-poltrona", { replace: true });
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function setup(credentials) {
-    setIsLoading(true);
-    try {
-      const response = await setupRequest(credentials);
-      setToken(response.access_token);
-      setUser(response.user);
-      navigate("/minha-poltrona", { replace: true });
+      navigate("/viagens", { replace: true });
     } finally {
       setIsLoading(false);
     }
@@ -86,7 +73,6 @@ export function AuthProvider({ children }) {
       isLoading,
       isInitializing,
       login,
-      setup,
       logout,
     }),
     [token, user, isLoading, isInitializing]

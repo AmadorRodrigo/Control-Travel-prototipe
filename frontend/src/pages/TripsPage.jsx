@@ -1,264 +1,209 @@
 import { useEffect, useMemo, useState } from "react";
 import AppHeader from "../components/AppHeader";
-import {
-  createTrip,
-  getPassengers,
-  getTripSeats,
-  getTrips,
-  releaseSeat,
-  reserveSeat,
-} from "../services/api";
+import { createTrip, getPassengers, getTripSeats, getTrips, releaseSeat, reserveSeat } from "../services/api";
 
-const initialTripForm = {
-  titulo: "",
-  origem: "",
-  destino: "",
-  data_partida: "",
-  status: "planejada",
-  capacidade_andar_inferior: 22,
-  capacidade_andar_superior: 22,
-  observacoes: "",
-};
+const STATUS_LABELS = { planejada: "Planejada", confirmada: "Confirmada", embarque: "Embarque", concluida: "Concluída", cancelada: "Cancelada" };
+const STATUS_TAG = { planejada: "tag-neutral", confirmada: "tag-outline", embarque: "tag-accent", concluida: "tag-neutral", cancelada: "tag-outline" };
+const STEP_ORDER = ["planejada", "confirmada", "embarque", "concluida"];
+const STEP_COLORS = { done: "var(--color-accent)", active: "var(--color-accent-300)", pending: "var(--color-neutral-300)" };
 
-const initialReservationForm = {
-  passageiro_id: "",
-  numero: "",
-  andar: "inferior",
-};
+function pad(n) { return String(n).padStart(2, "0"); }
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const initialTripForm = { titulo: "", origem: "", destino: "", data_partida: "", status: "planejada", capacidade_andar_inferior: 20, capacidade_andar_superior: 16 };
+
+function buildSeatRows(seatList) {
+  const cols = 4;
+  const rows = [];
+  for (let i = 0; i < seatList.length; i += cols) {
+    rows.push(seatList.slice(i, i + cols));
+  }
+  return rows;
+}
 
 function TripsPage() {
   const [trips, setTrips] = useState([]);
   const [passengers, setPassengers] = useState([]);
   const [selectedTripId, setSelectedTripId] = useState(null);
   const [seats, setSeats] = useState([]);
-  const [tripForm, setTripForm] = useState(initialTripForm);
-  const [reservationForm, setReservationForm] = useState(initialReservationForm);
-  const [tripPagination, setTripPagination] = useState({
-    page: 1,
-    page_size: 10,
-    total: 0,
-    total_pages: 0,
-  });
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [isLoadingTrips, setIsLoadingTrips] = useState(true);
   const [isLoadingSeats, setIsLoadingSeats] = useState(false);
-  const [isCreatingTrip, setIsCreatingTrip] = useState(false);
-  const [isReservingSeat, setIsReservingSeat] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
+  const [showNewTripDialog, setShowNewTripDialog] = useState(false);
+  const [tripForm, setTripForm] = useState(initialTripForm);
+  const [isCreatingTrip, setIsCreatingTrip] = useState(false);
+
+  const [activeSeat, setActiveSeat] = useState(null);
+  const [reservationPassengerId, setReservationPassengerId] = useState("");
+  const [isReservingSeat, setIsReservingSeat] = useState(false);
+
+  const [releaseSeatData, setReleaseSeatData] = useState(null);
+
   useEffect(() => {
-    async function bootstrapData() {
+    async function boot() {
       setIsLoadingTrips(true);
-
       try {
-        const [tripsResponse, passengersResponse] = await Promise.all([
-          getTrips({ page: 1, page_size: 10 }),
-          getPassengers({ page: 1, page_size: 50 }),
+        const [tripsRes, passengersRes] = await Promise.all([
+          getTrips({ page: 1, page_size: 50 }),
+          getPassengers({ page: 1, page_size: 100 }),
         ]);
-
-        setTrips(tripsResponse.items);
-        setTripPagination(tripsResponse.pagination);
-        setPassengers(passengersResponse.items);
-
-        if (tripsResponse.items.length > 0) {
-          setSelectedTripId(tripsResponse.items[0].id);
-        }
-      } catch (error) {
-        setErrorMessage(error.message);
+        setTrips(tripsRes.items);
+        setPassengers(passengersRes.items);
+        if (tripsRes.items.length > 0) setSelectedTripId(tripsRes.items[0].id);
+      } catch (e) {
+        setErrorMessage(e.message);
       } finally {
         setIsLoadingTrips(false);
       }
     }
-
-    bootstrapData();
+    boot();
   }, []);
 
   useEffect(() => {
-    async function loadSeats() {
-      if (!selectedTripId) {
-        setSeats([]);
-        return;
-      }
-
-      setIsLoadingSeats(true);
-
-      try {
-        const data = await getTripSeats(selectedTripId);
-        setSeats(data);
-      } catch (error) {
-        setErrorMessage(error.message);
-      } finally {
-        setIsLoadingSeats(false);
-      }
-    }
-
-    loadSeats();
+    if (!selectedTripId) { setSeats([]); return; }
+    setIsLoadingSeats(true);
+    getTripSeats(selectedTripId)
+      .then(setSeats)
+      .catch((e) => setErrorMessage(e.message))
+      .finally(() => setIsLoadingSeats(false));
   }, [selectedTripId]);
 
-  const selectedTrip = useMemo(
-    () => trips.find((trip) => trip.id === selectedTripId) || null,
-    [selectedTripId, trips]
-  );
+  const selectedTrip = useMemo(() => trips.find((t) => t.id === selectedTripId) || null, [trips, selectedTripId]);
+  const lowerSeats = useMemo(() => seats.filter((s) => s.andar === "inferior"), [seats]);
+  const upperSeats = useMemo(() => seats.filter((s) => s.andar === "superior"), [seats]);
 
-  const lowerDeckSeats = useMemo(
-    () => seats.filter((seat) => seat.andar === "inferior"),
-    [seats]
-  );
-  const upperDeckSeats = useMemo(
-    () => seats.filter((seat) => seat.andar === "superior"),
-    [seats]
-  );
+  const filteredTrips = useMemo(() => trips.filter((t) => {
+    const q = search.toLowerCase();
+    const matchText = !q || t.titulo.toLowerCase().includes(q) || t.origem.toLowerCase().includes(q) || t.destino.toLowerCase().includes(q);
+    const matchStatus = statusFilter === "all" || t.status === statusFilter;
+    return matchText && matchStatus;
+  }), [trips, search, statusFilter]);
 
-  function handleTripFormChange(event) {
-    const { name, value } = event.target;
-    setTripForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  }
+  const statusFilters = [
+    { key: "all", label: "Todas" },
+    { key: "planejada", label: "Planejadas" },
+    { key: "confirmada", label: "Confirmadas" },
+    { key: "embarque", label: "Embarque" },
+    { key: "concluida", label: "Concluídas" },
+  ];
 
-  function handleReservationFormChange(event) {
-    const { name, value } = event.target;
-    setReservationForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  }
-
-  function handleSeatSelection(seat) {
-    setReservationForm((current) => ({
-      ...current,
-      numero: String(seat.numero),
-      andar: seat.andar,
-    }));
-  }
-
-  async function refreshTrips(selectTripId) {
-    const data = await getTrips({ page: 1, page_size: 10 });
+  async function refreshTrips(selectId) {
+    const data = await getTrips({ page: 1, page_size: 50 });
     setTrips(data.items);
-    setTripPagination(data.pagination);
-
-    if (selectTripId) {
-      setSelectedTripId(selectTripId);
-    } else if (!selectedTripId && data.items.length > 0) {
-      setSelectedTripId(data.items[0].id);
-    }
+    if (selectId) setSelectedTripId(selectId);
   }
 
-  async function refreshSeats(viagemId = selectedTripId) {
-    if (!viagemId) {
-      return;
-    }
-
-    const data = await getTripSeats(viagemId);
+  async function refreshSeats() {
+    if (!selectedTripId) return;
+    const data = await getTripSeats(selectedTripId);
     setSeats(data);
   }
 
-  async function handleCreateTrip(event) {
-    event.preventDefault();
-    if (isCreatingTrip) {
-      return;
-    }
+  function handleTripFormChange(e) {
+    const { name, value } = e.target;
+    setTripForm((c) => ({ ...c, [name]: value }));
+  }
 
+  async function handleCreateTrip(e) {
+    e.preventDefault();
+    if (isCreatingTrip) return;
     setIsCreatingTrip(true);
     setErrorMessage("");
-
     try {
-      const createdTrip = await createTrip({
+      const created = await createTrip({
         ...tripForm,
         data_partida: new Date(tripForm.data_partida).toISOString(),
         capacidade_andar_inferior: Number(tripForm.capacidade_andar_inferior),
         capacidade_andar_superior: Number(tripForm.capacidade_andar_superior),
       });
-
       setTripForm(initialTripForm);
-      await refreshTrips(createdTrip.id);
-    } catch (error) {
-      setErrorMessage(error.message);
+      setShowNewTripDialog(false);
+      await refreshTrips(created.id);
+    } catch (e) {
+      setErrorMessage(e.message);
     } finally {
       setIsCreatingTrip(false);
     }
   }
 
-  async function handleReserveSeat(event) {
-    event.preventDefault();
-    if (isReservingSeat || !selectedTripId) {
-      return;
+  function handleSeatClick(seat) {
+    if (seat.ocupado) {
+      setReleaseSeatData(seat);
+    } else {
+      setActiveSeat(seat);
+      setReservationPassengerId("");
     }
+  }
 
+  async function handleReserveSeat(e) {
+    e.preventDefault();
+    if (isReservingSeat || !selectedTripId || !activeSeat) return;
     setIsReservingSeat(true);
     setErrorMessage("");
-
     try {
       await reserveSeat(selectedTripId, {
-        passageiro_id: Number(reservationForm.passageiro_id),
-        numero: Number(reservationForm.numero),
-        andar: reservationForm.andar,
+        passageiro_id: Number(reservationPassengerId),
+        numero: activeSeat.numero,
+        andar: activeSeat.andar,
       });
-      await refreshSeats(selectedTripId);
-      setReservationForm(initialReservationForm);
-    } catch (error) {
-      setErrorMessage(error.message);
+      setActiveSeat(null);
+      await refreshSeats();
+    } catch (e) {
+      setErrorMessage(e.message);
     } finally {
       setIsReservingSeat(false);
     }
   }
 
-  async function handleReleaseSeat(assentoId) {
-    if (!selectedTripId) {
-      return;
-    }
-
+  async function handleReleaseSeat() {
+    if (!releaseSeatData || !selectedTripId) return;
     try {
       setErrorMessage("");
-      await releaseSeat(selectedTripId, assentoId);
-      await refreshSeats(selectedTripId);
-    } catch (error) {
-      setErrorMessage(error.message);
+      await releaseSeat(selectedTripId, releaseSeatData.id);
+      setReleaseSeatData(null);
+      await refreshSeats();
+    } catch (e) {
+      setErrorMessage(e.message);
     }
   }
 
-  function renderSeatGrid(seatList, floorName) {
+  function renderSeatGrid(seatList, label) {
+    const occupied = seatList.filter((s) => s.ocupado).length;
+    const rows = buildSeatRows(seatList);
     return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Andar {floorName}
-          </h3>
-          <span className="text-xs text-slate-400">
-            {seatList.filter((seat) => seat.ocupado).length}/{seatList.length} ocupados
-          </span>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, textTransform: "uppercase", letterSpacing: ".1em", opacity: .55 }}>
+          <span>{label}</span>
+          <span>{occupied}/{seatList.length} ocupados</span>
         </div>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-          {seatList.map((seat) => (
-            <div
-              key={seat.id}
-              className={`rounded-2xl border p-4 text-left transition ${
-                seat.ocupado
-                  ? "border-amber-200 bg-amber-50"
-                  : "border-emerald-200 bg-emerald-50"
-              }`}
-            >
-              <button type="button" onClick={() => handleSeatSelection(seat)} className="w-full text-left">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Poltrona
-                </p>
-                <p className="mt-1 text-xl font-bold text-slate-900">{seat.numero}</p>
-                <p className="mt-2 text-sm text-slate-600">
-                  {seat.ocupado
-                    ? `Reservado para ${seat.passageiro_nome || "passageiro"}`
-                    : "Disponível"}
-                </p>
-              </button>
-              {seat.ocupado ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          {rows.map((row, ri) => (
+            <div key={ri} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ width: 20, fontSize: 11, opacity: .4, textAlign: "right" }}>{ri * 4 + 1}</span>
+              {row.map((seat) => (
                 <button
+                  key={seat.id}
                   type="button"
-                  onClick={() => handleReleaseSeat(seat.id)}
-                  className="mt-3 inline-flex rounded-full border border-amber-200 px-3 py-1 text-xs font-semibold text-amber-700"
+                  title={seat.ocupado ? `Reservado: ${seat.passageiro_nome || ""}` : `Poltrona ${seat.numero}`}
+                  onClick={() => handleSeatClick(seat)}
+                  style={{
+                    width: 52, height: 44,
+                    border: `1px solid ${seat.ocupado ? "var(--color-accent-300)" : "var(--color-divider)"}`,
+                    background: seat.ocupado ? "var(--color-accent-100)" : "var(--color-neutral-100)",
+                    color: "var(--color-text)",
+                    fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  }}
                 >
-                  Liberar
+                  {seat.numero}
                 </button>
-              ) : null}
+              ))}
             </div>
           ))}
         </div>
@@ -266,269 +211,199 @@ function TripsPage() {
     );
   }
 
+  function tripSteps(trip) {
+    const idx = STEP_ORDER.indexOf(trip.status);
+    return STEP_ORDER.map((s, i) => ({
+      color: i < idx ? STEP_COLORS.done : i === idx ? STEP_COLORS.active : STEP_COLORS.pending,
+    }));
+  }
+
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-4 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl space-y-4">
-        <AppHeader
-          title="Viagens, assentos e reserva"
-          description="Gestão de viagens com geração automática de assentos por andar, reserva protegida contra concorrência e operação mobile-first."
-        />
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <AppHeader />
+
+      <main style={{ flex: 1, padding: "32px 40px 64px", maxWidth: 1280, width: "100%", margin: "0 auto", display: "grid", gap: 32 }}>
+
+        {/* Page header */}
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+          <div>
+            <p style={{ fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--color-accent-700)", margin: "0 0 6px", fontWeight: 600 }}>Operação</p>
+            <h1 style={{ fontFamily: "var(--font-heading)", fontSize: 28, margin: 0 }}>Viagens e mapa de assentos</h1>
+            <p style={{ fontSize: 13, opacity: .6, margin: "6px 0 0", maxWidth: "60ch" }}>Crie viagens, acompanhe o status de embarque e reserve poltronas por andar.</p>
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => setShowNewTripDialog(true)}>+ Nova viagem</button>
+        </header>
 
         {errorMessage ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div style={{ background: "var(--color-accent-100)", color: "var(--color-accent-800)", padding: "12px 16px", fontSize: 13 }}>
             {errorMessage}
           </div>
         ) : null}
 
-        <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-          <article className="rounded-3xl bg-white p-5 shadow-card">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">Nova viagem</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Ao criar a viagem, o backend já monta o mapa de assentos por andar.
-              </p>
+        {/* Filters */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <input className="input" style={{ maxWidth: 320 }} type="text"
+            placeholder="Buscar por título, origem ou destino"
+            value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="seg" role="radiogroup">
+            {statusFilters.map((sf) => (
+              <label key={sf.key} className="seg-opt">
+                <input type="radio" name="status-filter" checked={statusFilter === sf.key}
+                  onChange={() => setStatusFilter(sf.key)} readOnly />
+                {sf.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Trip list */}
+        <div style={{ display: "grid", gap: 12 }}>
+          {isLoadingTrips ? (
+            <p style={{ fontSize: 13, opacity: .6 }}>Carregando viagens...</p>
+          ) : filteredTrips.length === 0 ? (
+            <div style={{ border: "1px dashed var(--color-divider)", padding: 24, fontSize: 13, opacity: .6 }}>
+              Nenhuma viagem encontrada para este filtro.
+            </div>
+          ) : filteredTrips.map((t) => {
+            const steps = tripSteps(t);
+            const isSelected = t.id === selectedTripId;
+            return (
+              <button key={t.id} type="button" onClick={() => setSelectedTripId(t.id)}
+                style={{
+                  textAlign: "left",
+                  border: `1px solid ${isSelected ? "var(--color-accent)" : "var(--color-divider)"}`,
+                  background: isSelected ? "var(--color-accent-100)" : "var(--color-surface)",
+                  padding: "20px 24px", display: "grid", gap: 12, cursor: "pointer",
+                }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{t.titulo}</h3>
+                    <p style={{ margin: "4px 0 0", fontSize: 13, opacity: .65 }}>{t.origem} → {t.destino} · {fmtDateTime(t.data_partida)}</p>
+                  </div>
+                  <span className={`tag ${STATUS_TAG[t.status] || "tag-neutral"}`}>{STATUS_LABELS[t.status] || t.status}</span>
+                </div>
+                <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
+                  {steps.map((s, i) => <div key={i} style={{ flex: 1, height: 3, background: s.color }} />)}
+                </div>
+                <p style={{ margin: 0, fontSize: 12, opacity: .55 }}>
+                  {t.capacidade_andar_inferior} inferior / {t.capacidade_andar_superior} superior
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Seat map */}
+        {selectedTrip ? (
+          <div className="card elev-sm" style={{ display: "grid", gap: 20 }}>
+            <div>
+              <div className="card-kicker">Mapa de assentos</div>
+              <div className="card-title">{selectedTrip.titulo}</div>
             </div>
 
-            <form className="space-y-3" onSubmit={handleCreateTrip}>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                type="text"
-                name="titulo"
-                placeholder="Ex: Excursão São Paulo x Curitiba"
-                value={tripForm.titulo}
-                onChange={handleTripFormChange}
-                required
-              />
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  type="text"
-                  name="origem"
-                  placeholder="Origem"
-                  value={tripForm.origem}
-                  onChange={handleTripFormChange}
-                  required
-                />
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  type="text"
-                  name="destino"
-                  placeholder="Destino"
-                  value={tripForm.destino}
-                  onChange={handleTripFormChange}
-                  required
-                />
+            {isLoadingSeats ? (
+              <p style={{ fontSize: 13, opacity: .6 }}>Carregando assentos...</p>
+            ) : (
+              <div style={{ display: "grid", gap: 28 }}>
+                {lowerSeats.length > 0 && renderSeatGrid(lowerSeats, "Andar inferior")}
+                {upperSeats.length > 0 && renderSeatGrid(upperSeats, "Andar superior")}
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  type="datetime-local"
-                  name="data_partida"
-                  value={tripForm.data_partida}
-                  onChange={handleTripFormChange}
-                  required
-                />
-                <select
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  name="status"
-                  value={tripForm.status}
-                  onChange={handleTripFormChange}
-                >
+            )}
+
+            <div style={{ display: "flex", gap: 20, fontSize: 12, opacity: .65 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 12, height: 12, background: "var(--color-neutral-100)", border: "1px solid var(--color-divider)", display: "inline-block" }} />
+                Disponível
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 12, height: 12, background: "var(--color-accent-100)", border: "1px solid var(--color-accent-300)", display: "inline-block" }} />
+                Reservado
+              </span>
+            </div>
+          </div>
+        ) : null}
+      </main>
+
+      {/* Dialog: Nova viagem */}
+      {showNewTripDialog ? (
+        <div className="dialog-backdrop">
+          <form className="dialog" onSubmit={handleCreateTrip} style={{ maxWidth: 480 }}>
+            <div className="dialog-title">Nova viagem</div>
+            <div className="dialog-body" style={{ display: "grid", gap: 12 }}>
+              <input className="input" type="text" name="titulo" placeholder="Título — ex: Excursão SP x Curitiba"
+                value={tripForm.titulo} onChange={handleTripFormChange} required />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <input className="input" type="text" name="origem" placeholder="Origem"
+                  value={tripForm.origem} onChange={handleTripFormChange} required />
+                <input className="input" type="text" name="destino" placeholder="Destino"
+                  value={tripForm.destino} onChange={handleTripFormChange} required />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <input className="input" type="datetime-local" name="data_partida"
+                  value={tripForm.data_partida} onChange={handleTripFormChange} required />
+                <select className="input" name="status" value={tripForm.status} onChange={handleTripFormChange}>
                   <option value="planejada">Planejada</option>
                   <option value="confirmada">Confirmada</option>
                   <option value="embarque">Embarque</option>
                 </select>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  type="number"
-                  min="0"
-                  max="80"
-                  name="capacidade_andar_inferior"
-                  placeholder="Assentos andar inferior"
-                  value={tripForm.capacidade_andar_inferior}
-                  onChange={handleTripFormChange}
-                  required
-                />
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  type="number"
-                  min="0"
-                  max="80"
-                  name="capacidade_andar_superior"
-                  placeholder="Assentos andar superior"
-                  value={tripForm.capacidade_andar_superior}
-                  onChange={handleTripFormChange}
-                  required
-                />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <input className="input" type="number" min="0" max="80" name="capacidade_andar_inferior"
+                  placeholder="Assentos andar inferior" value={tripForm.capacidade_andar_inferior} onChange={handleTripFormChange} />
+                <input className="input" type="number" min="0" max="80" name="capacidade_andar_superior"
+                  placeholder="Assentos andar superior" value={tripForm.capacidade_andar_superior} onChange={handleTripFormChange} />
               </div>
-              <textarea
-                className="min-h-28 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                name="observacoes"
-                placeholder="Observações operacionais"
-                value={tripForm.observacoes}
-                onChange={handleTripFormChange}
-              />
-              <button
-                type="submit"
-                disabled={isCreatingTrip}
-                className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isCreatingTrip ? "Criando viagem..." : "Criar viagem"}
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowNewTripDialog(false)}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" disabled={isCreatingTrip}>
+                {isCreatingTrip ? "Criando..." : "Criar viagem"}
               </button>
-            </form>
-          </article>
-
-          <article className="rounded-3xl bg-white p-5 shadow-card">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Viagens criadas</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {tripPagination.total} viagens registradas na base.
-                </p>
-              </div>
             </div>
+          </form>
+        </div>
+      ) : null}
 
-            {isLoadingTrips ? (
-              <p className="text-sm text-slate-500">Carregando viagens...</p>
-            ) : trips.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                Nenhuma viagem cadastrada ainda.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {trips.map((trip) => {
-                  const isSelected = trip.id === selectedTripId;
-                  return (
-                    <button
-                      key={trip.id}
-                      type="button"
-                      onClick={() => setSelectedTripId(trip.id)}
-                      className={`w-full rounded-2xl border p-4 text-left transition ${
-                        isSelected
-                          ? "border-brand-500 bg-brand-50"
-                          : "border-slate-200 hover:bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <h3 className="font-semibold text-slate-900">{trip.titulo}</h3>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {trip.origem} → {trip.destino}
-                          </p>
-                        </div>
-                        <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          {trip.status}
-                        </span>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-1 gap-2 text-sm text-slate-600 sm:grid-cols-2">
-                        <p>
-                          Partida:{" "}
-                          {new Date(trip.data_partida).toLocaleString("pt-BR")}
-                        </p>
-                        <p>
-                          Assentos: {trip.capacidade_andar_inferior} inferior /{" "}
-                          {trip.capacidade_andar_superior} superior
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </article>
-        </section>
-
-        <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <article className="rounded-3xl bg-white p-5 shadow-card">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Mapa de assentos
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {selectedTrip
-                  ? `Reserva ativa para ${selectedTrip.titulo}.`
-                  : "Selecione uma viagem para visualizar o mapa de assentos."}
-              </p>
-            </div>
-
-            {!selectedTrip ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                Nenhuma viagem selecionada.
-              </div>
-            ) : isLoadingSeats ? (
-              <p className="text-sm text-slate-500">Carregando assentos...</p>
-            ) : (
-              <div className="space-y-6">
-                {renderSeatGrid(lowerDeckSeats, "inferior")}
-                {upperDeckSeats.length > 0 ? renderSeatGrid(upperDeckSeats, "superior") : null}
-              </div>
-            )}
-          </article>
-
-          <article className="rounded-3xl bg-white p-5 shadow-card">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Reservar assento
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Clique em uma poltrona do mapa ou preencha manualmente o número e andar.
-              </p>
-            </div>
-
-            <form className="space-y-3" onSubmit={handleReserveSeat}>
-              <select
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                name="passageiro_id"
-                value={reservationForm.passageiro_id}
-                onChange={handleReservationFormChange}
-                required
-              >
+      {/* Dialog: Reservar poltrona */}
+      {activeSeat ? (
+        <div className="dialog-backdrop">
+          <form className="dialog" onSubmit={handleReserveSeat} style={{ maxWidth: 420 }}>
+            <div className="dialog-title">Reservar poltrona {activeSeat.numero} — {activeSeat.andar}</div>
+            <div className="dialog-body" style={{ display: "grid", gap: 12 }}>
+              <select className="input" value={reservationPassengerId}
+                onChange={(e) => setReservationPassengerId(e.target.value)} required>
                 <option value="">Selecione o passageiro</option>
-                {passengers.map((passenger) => (
-                  <option key={passenger.id} value={passenger.id}>
-                    {passenger.nome}
-                  </option>
+                {passengers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nome}</option>
                 ))}
               </select>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  type="number"
-                  min="1"
-                  max="99"
-                  name="numero"
-                  placeholder="Número da poltrona"
-                  value={reservationForm.numero}
-                  onChange={handleReservationFormChange}
-                  required
-                />
-                <select
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                  name="andar"
-                  value={reservationForm.andar}
-                  onChange={handleReservationFormChange}
-                >
-                  <option value="inferior">Andar inferior</option>
-                  <option value="superior">Andar superior</option>
-                </select>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isReservingSeat || !selectedTripId}
-                className="w-full rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isReservingSeat ? "Reservando..." : "Reservar assento"}
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setActiveSeat(null)}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" disabled={isReservingSeat}>
+                {isReservingSeat ? "Reservando..." : "Reservar"}
               </button>
-            </form>
-          </article>
-        </section>
-      </div>
-    </main>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {/* Dialog: Liberar poltrona */}
+      {releaseSeatData ? (
+        <div className="dialog-backdrop">
+          <div className="dialog" style={{ maxWidth: 420 }}>
+            <div className="dialog-title">Liberar poltrona {releaseSeatData.numero}</div>
+            <div className="dialog-body">
+              Atualmente reservada para <strong>{releaseSeatData.passageiro_nome || "passageiro"}</strong>. Deseja liberar esta poltrona?
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setReleaseSeatData(null)}>Cancelar</button>
+              <button type="button" className="btn btn-primary" onClick={handleReleaseSeat}>Liberar poltrona</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -13,8 +13,8 @@ function AdminRoute({ children }) {
 
   if (isInitializing) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
-        <div className="rounded-3xl bg-white px-6 py-5 text-sm font-medium text-slate-600 shadow-card">
+      <main style={{ display: "grid", placeItems: "center", minHeight: "100vh", background: "var(--color-bg)" }}>
+        <div className="card elev-sm" style={{ padding: "20px 28px", fontSize: 14 }}>
           Validando sua sessão...
         </div>
       </main>

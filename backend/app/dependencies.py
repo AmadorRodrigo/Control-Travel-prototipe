@@ -35,7 +35,6 @@ def get_current_user(
         payload = decode_token(token)
         token_type = payload.get("type")
         user_id = payload.get("sub")
-        token_version = payload.get("ver", 0)
         if token_type != "access" or not user_id:
             raise credentials_exception
     except Exception as exc:
@@ -45,20 +44,7 @@ def get_current_user(
     if not user or not user.is_active:
         raise credentials_exception
 
-    # Reject tokens issued before the last password change
-    if user.token_version != token_version:
-        raise credentials_exception
-
     return user
-
-
-def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso restrito a administradores.",
-        )
-    return current_user
 
 
 def enforce_rate_limit(*, key: str, limit: int, window_seconds: int, detail: str) -> None:

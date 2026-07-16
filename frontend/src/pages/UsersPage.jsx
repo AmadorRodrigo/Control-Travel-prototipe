@@ -1,38 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createUser, deleteUser, getUsers, updateUser } from "../services/api";
 import AppHeader from "../components/AppHeader";
 import { useAuth } from "../context/AuthContext";
 
-const initialForm = {
-  username: "",
-  email: "",
-  password: "",
-  is_admin: false,
-};
+const initialForm = { username: "", email: "", password: "", is_admin: false };
 
 function UsersPage() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
-  const [formData, setFormData] = useState(initialForm);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [openMenuId, setOpenMenuId] = useState(null);
-  const [editingUser, setEditingUser] = useState(null);
   const [isDeletingId, setIsDeletingId] = useState(null);
-  const menuRefs = useRef({});
 
-  useEffect(() => {
-    function handleOutsideClick(event) {
-      if (openMenuId === null) return;
-      const menuEl = menuRefs.current[openMenuId];
-      if (menuEl && !menuEl.contains(event.target)) {
-        setOpenMenuId(null);
-      }
-    }
-    document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, [openMenuId]);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [formData, setFormData] = useState(initialForm);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -40,8 +23,8 @@ function UsersPage() {
       try {
         const data = await getUsers();
         setUsers(data.items);
-      } catch (error) {
-        setErrorMessage(error.message);
+      } catch (e) {
+        setErrorMessage(e.message);
       } finally {
         setIsLoading(false);
       }
@@ -49,39 +32,32 @@ function UsersPage() {
     load();
   }, []);
 
-  async function refreshList() {
+  async function refresh() {
     const data = await getUsers();
     setUsers(data.items);
   }
 
-  function handleChange(event) {
-    const { name, value, type, checked } = event.target;
-    setFormData((current) => ({
-      ...current,
-      [name]: type === "checkbox" ? checked : value,
-    }));
-  }
-
-  function startEdit(user) {
-    setEditingUser(user);
-    setFormData({
-      username: user.username,
-      email: user.email,
-      password: "",
-      is_admin: user.is_admin,
-    });
-    setOpenMenuId(null);
-    setErrorMessage("");
-  }
-
-  function cancelEdit() {
+  function openNew() {
     setEditingUser(null);
     setFormData(initialForm);
     setErrorMessage("");
+    setShowDialog(true);
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
+  function openEdit(u) {
+    setEditingUser(u);
+    setFormData({ username: u.username, email: u.email, password: "", is_admin: u.is_admin });
+    setErrorMessage("");
+    setShowDialog(true);
+  }
+
+  function handleChange(e) {
+    const { name, value, type, checked } = e.target;
+    setFormData((c) => ({ ...c, [name]: type === "checkbox" ? checked : value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
     setErrorMessage("");
@@ -92,238 +68,132 @@ function UsersPage() {
         if (formData.email !== editingUser.email) payload.email = formData.email;
         if (formData.is_admin !== editingUser.is_admin) payload.is_admin = formData.is_admin;
         if (formData.password) payload.password = formData.password;
-        if (Object.keys(payload).length === 0) {
-          setEditingUser(null);
-          setFormData(initialForm);
-          setIsSubmitting(false);
-          return;
-        }
-        await updateUser(editingUser.id, payload);
-        setEditingUser(null);
-        setFormData(initialForm);
+        if (Object.keys(payload).length > 0) await updateUser(editingUser.id, payload);
       } else {
         await createUser(formData);
-        setFormData(initialForm);
       }
-      await refreshList();
-    } catch (error) {
-      setErrorMessage(error.message);
+      setShowDialog(false);
+      await refresh();
+    } catch (e) {
+      setErrorMessage(e.message);
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function handleDelete(id) {
+  async function handleDelete(u) {
     if (isDeletingId) return;
-    setIsDeletingId(id);
-    setOpenMenuId(null);
+    if (!window.confirm(`Excluir usuário "${u.username}"?`)) return;
+    setIsDeletingId(u.id);
     setErrorMessage("");
     try {
-      await deleteUser(id);
-      await refreshList();
-    } catch (error) {
-      setErrorMessage(error.message);
+      await deleteUser(u.id);
+      await refresh();
+    } catch (e) {
+      setErrorMessage(e.message);
     } finally {
       setIsDeletingId(null);
     }
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-4 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-6xl space-y-4">
-        <AppHeader
-          title="Gerenciamento de usuários"
-          description="Cadastre e gerencie os usuários do sistema. Usuários comuns visualizam apenas suas poltronas."
-        />
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <AppHeader />
+
+      <main style={{ flex: 1, padding: "32px 40px 64px", maxWidth: 1280, width: "100%", margin: "0 auto", display: "grid", gap: 24 }} className="page-fade">
+
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+          <div>
+            <p style={{ fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--color-accent-700)", margin: "0 0 6px", fontWeight: 600 }}>Acesso</p>
+            <h1 style={{ fontFamily: "var(--font-heading)", fontSize: 28, margin: 0 }}>Usuários</h1>
+            <p style={{ fontSize: 13, opacity: .6, margin: "6px 0 0" }}>Usuários comuns visualizam apenas a própria poltrona.</p>
+          </div>
+          <button type="button" className="btn btn-primary" onClick={openNew}>+ Novo usuário</button>
+        </header>
 
         {errorMessage ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div style={{ background: "var(--color-accent-100)", color: "var(--color-accent-800)", padding: "12px 16px", fontSize: 13 }}>
             {errorMessage}
           </div>
         ) : null}
 
-        <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <article className="rounded-3xl bg-white p-5 shadow-card">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Lista de usuários
-              </h2>
-              <p className="mt-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-                {users.length} usuário{users.length !== 1 ? "s" : ""} no total
-              </p>
-            </div>
+        {isLoading ? (
+          <p style={{ fontSize: 13, opacity: .6 }}>Carregando usuários...</p>
+        ) : users.length === 0 ? (
+          <div style={{ border: "1px dashed var(--color-divider)", padding: 24, fontSize: 13, opacity: .6 }}>
+            Nenhum usuário cadastrado.
+          </div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Usuário</th>
+                <th>E-mail</th>
+                <th>Papel</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td style={{ fontWeight: 600 }}>
+                    {u.username}
+                    {u.id === currentUser?.id ? <span className="tag tag-neutral" style={{ marginLeft: 8 }}>Você</span> : null}
+                  </td>
+                  <td className="text-muted">{u.email}</td>
+                  <td><span className={`tag ${u.is_admin ? "tag-accent" : "tag-neutral"}`}>{u.is_admin ? "Admin" : "Usuário"}</span></td>
+                  <td><span className={`tag ${u.is_active ? "tag-outline" : "tag-neutral"}`}>{u.is_active ? "Ativo" : "Inativo"}</span></td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {u.id !== currentUser?.id ? (
+                      <>
+                        <button type="button" className="btn btn-ghost" onClick={() => openEdit(u)}>Editar</button>
+                        <button type="button" className="btn btn-ghost" style={{ color: "var(--color-accent-700)" }}
+                          onClick={() => handleDelete(u)} disabled={isDeletingId === u.id}>
+                          {isDeletingId === u.id ? "..." : "Excluir"}
+                        </button>
+                      </>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </main>
 
-            {isLoading ? (
-              <p className="text-sm text-slate-500">Carregando usuários...</p>
-            ) : users.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                Nenhum usuário cadastrado.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {users.map((u) => (
-                  <div
-                    key={u.id}
-                    className="rounded-2xl border border-slate-200 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-slate-900">
-                            {u.username}
-                          </h3>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                              u.is_admin
-                                ? "bg-brand-50 text-brand-700"
-                                : "bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {u.is_admin ? "Admin" : "Usuário"}
-                          </span>
-                          {!u.is_active ? (
-                            <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600">
-                              Inativo
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="mt-1 text-sm text-slate-500">{u.email}</p>
-                      </div>
-
-                      {u.id !== currentUser?.id ? (
-                        <div
-                          className="relative"
-                          ref={(el) => {
-                            if (el) menuRefs.current[u.id] = el;
-                            else delete menuRefs.current[u.id];
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setOpenMenuId(openMenuId === u.id ? null : u.id)
-                            }
-                            className="flex flex-col items-center justify-center gap-[4px] rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                            aria-label="Ações do usuário"
-                          >
-                            <span className="block h-[2px] w-4 rounded bg-current" />
-                            <span className="block h-[2px] w-4 rounded bg-current" />
-                            <span className="block h-[2px] w-4 rounded bg-current" />
-                          </button>
-
-                          {openMenuId === u.id ? (
-                            <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-2xl border border-slate-200 bg-white py-1 shadow-lg">
-                              <button
-                                type="button"
-                                onClick={() => startEdit(u)}
-                                className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                              >
-                                Editar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(u.id)}
-                                disabled={isDeletingId === u.id}
-                                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
-                              >
-                                {isDeletingId === u.id ? "Excluindo..." : "Excluir"}
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-400">
-                          Você
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </article>
-
-          <article className="rounded-3xl bg-white p-5 shadow-card">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                {editingUser ? "Editar usuário" : "Novo usuário"}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {editingUser
-                  ? `Alterando dados de ${editingUser.username}.`
-                  : "Preencha os dados para criar um novo acesso ao sistema."}
-              </p>
-            </div>
-
-            <form className="space-y-3" onSubmit={handleSubmit}>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                type="text"
-                name="username"
-                placeholder="Nome de usuário"
-                value={formData.username}
-                onChange={handleChange}
-                required
-              />
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                type="email"
-                name="email"
-                placeholder="E-mail"
-                value={formData.email}
-                onChange={handleChange}
-                required
-              />
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100"
-                type="password"
-                name="password"
+      {showDialog ? (
+        <div className="dialog-backdrop">
+          <form className="dialog" onSubmit={handleSubmit} style={{ maxWidth: 420 }}>
+            <div className="dialog-title">{editingUser ? "Editar usuário" : "Novo usuário"}</div>
+            <div className="dialog-body" style={{ display: "grid", gap: 12 }}>
+              <input className="input" type="text" name="username" placeholder="Nome de usuário"
+                value={formData.username} onChange={handleChange} required />
+              <input className="input" type="email" name="email" placeholder="E-mail"
+                value={formData.email} onChange={handleChange} required />
+              <input className="input" type="password" name="password"
                 placeholder={editingUser ? "Nova senha (deixe em branco para manter)" : "Senha"}
-                value={formData.password}
-                onChange={handleChange}
-                required={!editingUser}
-                minLength={6}
-              />
-
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input
-                  type="checkbox"
-                  name="is_admin"
-                  checked={formData.is_admin}
-                  onChange={handleChange}
-                  className="h-4 w-4 rounded accent-slate-900"
-                />
-                <span className="text-sm text-slate-700">
-                  Administrador — acesso completo ao sistema
-                </span>
+                value={formData.password} onChange={handleChange} required={!editingUser} minLength={6} />
+              <label style={{ border: "1px solid var(--color-divider)", padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, fontSize: 14 }}>
+                <input type="checkbox" name="is_admin" checked={formData.is_admin} onChange={handleChange} />
+                Administrador — acesso completo ao sistema
               </label>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isSubmitting
-                  ? "Salvando..."
-                  : editingUser
-                  ? "Salvar alterações"
-                  : "Criar usuário"}
-              </button>
-
-              {editingUser ? (
-                <button
-                  type="button"
-                  onClick={cancelEdit}
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
+              {errorMessage ? (
+                <div style={{ background: "var(--color-accent-100)", color: "var(--color-accent-800)", padding: "12px 16px", fontSize: 13 }}>
+                  {errorMessage}
+                </div>
               ) : null}
-            </form>
-          </article>
-        </section>
-      </div>
-    </main>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowDialog(false)}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+                {isSubmitting ? "Salvando..." : editingUser ? "Salvar" : "Criar usuário"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 
 function LoginPage() {
   const { login, setup, isAuthenticated, isLoading, user } = useAuth();
-  const [mode, setMode] = useState("login"); // "login" | "setup"
+  const [mode, setMode] = useState("login");
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [setupForm, setSetupForm] = useState({ documento: "", email: "", new_password: "", confirm: "" });
   const [errorMessage, setErrorMessage] = useState("");
@@ -43,227 +43,127 @@ function LoginPage() {
     }
     setErrorMessage("");
     try {
-      await setup({
-        documento: setupForm.documento,
-        email: setupForm.email,
-        new_password: setupForm.new_password,
-      });
+      await setup({ documento: setupForm.documento, email: setupForm.email, new_password: setupForm.new_password });
     } catch (error) {
       setErrorMessage(error.message);
     }
   }
 
-  const inputClass =
-    "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base outline-none transition focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100";
-
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl items-center">
-        <div className="grid w-full overflow-hidden rounded-[28px] bg-white shadow-card lg:grid-cols-2">
-          <section className="flex flex-col justify-between bg-gradient-to-br from-brand-900 via-brand-700 to-brand-500 p-6 text-white sm:p-8">
-            <div className="space-y-4">
-              <span className="inline-flex w-fit rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]">
-                Mobile First
-              </span>
-              <div className="space-y-3">
-                <h1 className="text-3xl font-bold leading-tight sm:text-4xl">
-                  Controle viagens, ocupação e alocação com foco em operação.
-                </h1>
-                <p className="max-w-md text-sm leading-6 text-blue-50 sm:text-base">
-                  Acesso rápido para equipes que precisam cadastrar viajantes,
-                  distribuir assentos por andar e manter a operação estável em
-                  telas pequenas.
-                </p>
-              </div>
+    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 32, background: "var(--color-neutral-900)" }}>
+      <div style={{
+        width: "100%", maxWidth: 960,
+        background: "var(--color-surface)",
+        display: "grid", gridTemplateColumns: "1.05fr 1fr",
+        boxShadow: "var(--shadow-lg)",
+        animation: "ct-fade .35s ease",
+      }}>
+        {/* Left panel */}
+        <section style={{
+          background: "var(--color-text)", color: "var(--color-bg)",
+          padding: "48px 40px",
+          display: "flex", flexDirection: "column",
+          justifyContent: "space-between", gap: 32,
+        }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <span className="tag tag-accent" style={{ width: "fit-content" }}>Control Travel</span>
+            <h1 style={{ fontFamily: "var(--font-heading)", fontSize: 34, lineHeight: 1.15, margin: 0, fontWeight: 700 }}>
+              Controle de viagens, andares e poltronas.
+            </h1>
+            <p style={{ fontSize: 14, lineHeight: 1.6, opacity: .75, maxWidth: "36ch", margin: 0 }}>
+              Cadastro sem venda, alocação de assentos por andar e acompanhamento de embarque — pensado para operação, não para bilheteria.
+            </p>
+          </div>
+          <div style={{ display: "grid", gap: 2, background: "var(--color-divider)" }}>
+            <div style={{ background: "var(--color-text)", padding: "16px 0", display: "flex", justifyContent: "space-between", gap: 16 }}>
+              <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".12em", opacity: .55 }}>Sistema</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Pronto para uso</span>
             </div>
-
-            <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-wide text-blue-100">Segurança</p>
-                <p className="mt-2 text-sm font-medium">JWT + hash bcrypt</p>
-              </div>
-              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-wide text-blue-100">Assentos</p>
-                <p className="mt-2 text-sm font-medium">Poltrona por número e andar</p>
-              </div>
-              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
-                <p className="text-xs uppercase tracking-wide text-blue-100">Operação</p>
-                <p className="mt-2 text-sm font-medium">Cadastro sem venda</p>
-              </div>
+            <div style={{ background: "var(--color-text)", padding: "16px 0", display: "flex", justifyContent: "space-between", gap: 16 }}>
+              <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".12em", opacity: .55 }}>Assentos</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Por número e andar</span>
             </div>
-          </section>
-
-          <section className="p-5 sm:p-8">
-            <div className="mx-auto flex min-h-full max-w-md flex-col justify-center">
-              {/* Mode toggle */}
-              <div className="mb-6 flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
-                <button
-                  type="button"
-                  onClick={() => { setMode("login"); setErrorMessage(""); }}
-                  className={`flex-1 rounded-xl py-2 text-sm font-semibold transition ${
-                    mode === "login"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  Entrar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setMode("setup"); setErrorMessage(""); }}
-                  className={`flex-1 rounded-xl py-2 text-sm font-semibold transition ${
-                    mode === "setup"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  Primeiro acesso
-                </button>
-              </div>
-
-              {mode === "login" ? (
-                <>
-                  <div className="mb-6">
-                    <h2 className="text-2xl font-bold text-slate-900">Acesse sua conta</h2>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Use seu usuário ou e-mail cadastrado.
-                    </p>
-                  </div>
-
-                  <form className="space-y-4" onSubmit={handleLoginSubmit}>
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-slate-700">Usuário ou e-mail</span>
-                      <input
-                        className={inputClass}
-                        type="text"
-                        name="username"
-                        autoComplete="username"
-                        placeholder="Digite seu usuário ou e-mail"
-                        value={loginForm.username}
-                        onChange={handleLoginChange}
-                        required
-                      />
-                    </label>
-
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-slate-700">Senha</span>
-                      <input
-                        className={inputClass}
-                        type="password"
-                        name="password"
-                        autoComplete="current-password"
-                        placeholder="Digite sua senha"
-                        value={loginForm.password}
-                        onChange={handleLoginChange}
-                        required
-                      />
-                    </label>
-
-                    {errorMessage ? (
-                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {errorMessage}
-                      </div>
-                    ) : null}
-
-                    <button
-                      type="submit"
-                      disabled={isLoading}
-                      className="flex w-full items-center justify-center rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {isLoading ? "Entrando..." : "Entrar"}
-                    </button>
-                  </form>
-                </>
-              ) : (
-                <>
-                  <div className="mb-6">
-                    <h2 className="text-2xl font-bold text-slate-900">Primeiro acesso</h2>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Informe seu documento (RG, CPF ou passaporte) cadastrado pelo administrador, seu e-mail e defina uma senha. Após confirmar, você verá sua poltrona e viagem.
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Já possui conta? Use este formulário com o e-mail cadastrado para redefinir sua senha.
-                    </p>
-                  </div>
-
-                  <form className="space-y-4" onSubmit={handleSetupSubmit}>
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-slate-700">Documento (RG, CPF ou passaporte)</span>
-                      <input
-                        className={inputClass}
-                        type="text"
-                        name="documento"
-                        autoComplete="off"
-                        placeholder="Número do documento cadastrado"
-                        value={setupForm.documento}
-                        onChange={handleSetupChange}
-                        required
-                      />
-                    </label>
-
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-slate-700">Seu e-mail</span>
-                      <input
-                        className={inputClass}
-                        type="email"
-                        name="email"
-                        autoComplete="email"
-                        placeholder="seu@email.com"
-                        value={setupForm.email}
-                        onChange={handleSetupChange}
-                        required
-                      />
-                    </label>
-
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-slate-700">Nova senha</span>
-                      <input
-                        className={inputClass}
-                        type="password"
-                        name="new_password"
-                        autoComplete="new-password"
-                        placeholder="Mínimo 6 caracteres"
-                        value={setupForm.new_password}
-                        onChange={handleSetupChange}
-                        required
-                        minLength={6}
-                      />
-                    </label>
-
-                    <label className="block space-y-2">
-                      <span className="text-sm font-medium text-slate-700">Confirmar senha</span>
-                      <input
-                        className={inputClass}
-                        type="password"
-                        name="confirm"
-                        autoComplete="new-password"
-                        placeholder="Repita a senha"
-                        value={setupForm.confirm}
-                        onChange={handleSetupChange}
-                        required
-                        minLength={6}
-                      />
-                    </label>
-
-                    {errorMessage ? (
-                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {errorMessage}
-                      </div>
-                    ) : null}
-
-                    <button
-                      type="submit"
-                      disabled={isLoading}
-                      className="flex w-full items-center justify-center rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {isLoading ? "Salvando..." : "Definir senha e entrar"}
-                    </button>
-                  </form>
-                </>
-              )}
+            <div style={{ background: "var(--color-text)", padding: "16px 0 0", display: "flex", justifyContent: "space-between", gap: 16 }}>
+              <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".12em", opacity: .55 }}>Operação</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Cadastro sem venda</span>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
+
+        {/* Right panel */}
+        <section style={{ padding: "48px 40px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 24 }}>
+          <div className="seg" role="radiogroup" style={{ width: "100%" }}>
+            <label className="seg-opt" style={{ flex: 1, justifyContent: "center" }}>
+              <input type="radio" name="login-tab" checked={mode === "login"} onChange={() => { setMode("login"); setErrorMessage(""); }} readOnly />
+              Entrar
+            </label>
+            <label className="seg-opt" style={{ flex: 1, justifyContent: "center" }}>
+              <input type="radio" name="login-tab" checked={mode === "setup"} onChange={() => { setMode("setup"); setErrorMessage(""); }} readOnly />
+              Primeiro acesso
+            </label>
+          </div>
+
+          {mode === "login" ? (
+            <form style={{ display: "grid", gap: 16 }} onSubmit={handleLoginSubmit}>
+              <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 22, margin: 0 }}>Acesse sua conta</h2>
+              <div className="field">
+                <label htmlFor="ct-username">Usuário ou e-mail</label>
+                <input className="input" id="ct-username" type="text" name="username"
+                  placeholder="rodrigo.amador" value={loginForm.username} onChange={handleLoginChange} autoComplete="username" required />
+              </div>
+              <div className="field">
+                <label htmlFor="ct-password">Senha</label>
+                <input className="input" id="ct-password" type="password" name="password"
+                  placeholder="••••••••" value={loginForm.password} onChange={handleLoginChange} autoComplete="current-password" required />
+              </div>
+              {errorMessage ? (
+                <div style={{ background: "var(--color-accent-100)", color: "var(--color-accent-800)", padding: "12px 16px", fontSize: 13 }}>
+                  {errorMessage}
+                </div>
+              ) : null}
+              <button type="submit" className="btn btn-primary btn-block" disabled={isLoading}>
+                {isLoading ? "Entrando..." : "Entrar como administrador"}
+              </button>
+            </form>
+          ) : (
+            <form style={{ display: "grid", gap: 16 }} onSubmit={handleSetupSubmit}>
+              <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 22, margin: 0 }}>Primeiro acesso</h2>
+              <p style={{ fontSize: 13, opacity: .6, margin: 0 }}>
+                Informe o documento cadastrado pelo administrador, seu e-mail e defina uma senha.
+              </p>
+              <div className="field">
+                <label htmlFor="ct-doc">Documento (RG, CPF ou passaporte)</label>
+                <input className="input" id="ct-doc" type="text" name="documento"
+                  placeholder="12345678900" value={setupForm.documento} onChange={handleSetupChange} autoComplete="off" required />
+              </div>
+              <div className="field">
+                <label htmlFor="ct-email">Seu e-mail</label>
+                <input className="input" id="ct-email" type="email" name="email"
+                  placeholder="voce@email.com" value={setupForm.email} onChange={handleSetupChange} autoComplete="email" required />
+              </div>
+              <div className="field">
+                <label htmlFor="ct-pass1">Nova senha</label>
+                <input className="input" id="ct-pass1" type="password" name="new_password"
+                  placeholder="Mínimo 6 caracteres" value={setupForm.new_password} onChange={handleSetupChange}
+                  autoComplete="new-password" required minLength={6} />
+              </div>
+              <div className="field">
+                <label htmlFor="ct-pass2">Confirmar senha</label>
+                <input className="input" id="ct-pass2" type="password" name="confirm"
+                  placeholder="Repita a senha" value={setupForm.confirm} onChange={handleSetupChange}
+                  autoComplete="new-password" required minLength={6} />
+              </div>
+              {errorMessage ? (
+                <div style={{ background: "var(--color-accent-100)", color: "var(--color-accent-800)", padding: "12px 16px", fontSize: 13 }}>
+                  {errorMessage}
+                </div>
+              ) : null}
+              <button type="submit" className="btn btn-primary btn-block" disabled={isLoading}>
+                {isLoading ? "Salvando..." : "Definir senha e ver minha poltrona"}
+              </button>
+            </form>
+          )}
+        </section>
       </div>
     </main>
   );

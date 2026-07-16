@@ -1,37 +1,60 @@
 import { useEffect, useState } from "react";
 import { getMySeats } from "../services/api";
 import AppHeader from "../components/AppHeader";
+import { useAuth } from "../context/AuthContext";
+
+function pad(n) { return String(n).padStart(2, "0"); }
+function fmtDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const STATUS_LABELS = { planejada: "Planejada", confirmada: "Confirmada", embarque: "Embarque", concluida: "Concluída", cancelada: "Cancelada" };
+const STATUS_TAG = { planejada: "tag-neutral", confirmada: "tag-outline", embarque: "tag-accent", concluida: "tag-neutral", cancelada: "tag-neutral" };
+const STEP_ORDER = ["planejada", "confirmada", "embarque", "concluida"];
 
 function MySeatsPage() {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function load() {
-      setIsLoading(true);
-      try {
-        const result = await getMySeats();
-        setData(result);
-      } catch (error) {
-        setErrorMessage(error.message);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    load();
+    getMySeats()
+      .then(setData)
+      .catch((e) => setErrorMessage(e.message))
+      .finally(() => setIsLoading(false));
   }, []);
 
+  const upcoming = data?.assentos?.find((a) => ["planejada", "confirmada", "embarque"].includes(a.viagem.status));
+  const history = data?.assentos?.filter((a) => !["planejada", "confirmada", "embarque"].includes(a.viagem.status)) || [];
+
+  function tripSteps(status) {
+    const idx = STEP_ORDER.indexOf(status);
+    return STEP_ORDER.map((_, i) => ({
+      color: i < idx ? "var(--color-accent)" : i === idx ? "var(--color-accent-300)" : "var(--color-neutral-300)",
+      label: STATUS_LABELS[STEP_ORDER[i]],
+      textColor: i <= idx ? "var(--color-accent)" : "var(--color-neutral-500)",
+    }));
+  }
+
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-4 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-3xl space-y-4">
-        <AppHeader
-          title="Minha poltrona"
-          description="Visualize sua poltrona e andar nas viagens em que você foi alocado."
-        />
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <AppHeader />
+
+      <main style={{ flex: 1, padding: "32px 40px 64px", maxWidth: 800, width: "100%", margin: "0 auto", display: "grid", gap: 32 }} className="page-fade">
+
+        <header>
+          <p style={{ fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--color-accent-700)", margin: "0 0 6px", fontWeight: 600 }}>Minha poltrona</p>
+          <h1 style={{ fontFamily: "var(--font-heading)", fontSize: 28, margin: 0 }}>
+            Olá, {data?.passageiro?.nome?.split(" ")[0] || user?.username}
+          </h1>
+          <p style={{ fontSize: 13, opacity: .6, margin: "6px 0 0" }}>Suas viagens, poltrona e andar alocados pelo administrador.</p>
+        </header>
 
         {errorMessage ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div style={{ background: "var(--color-accent-100)", color: "var(--color-accent-800)", padding: "12px 16px", fontSize: 13 }}>
             {errorMessage === "Nenhum cadastro de passageiro vinculado a este usuário."
               ? "Você ainda não foi vinculado a nenhum passageiro. Aguarde o administrador configurar seu acesso."
               : errorMessage}
@@ -39,82 +62,79 @@ function MySeatsPage() {
         ) : null}
 
         {isLoading ? (
-          <div className="rounded-3xl bg-white p-5 shadow-card">
-            <p className="text-sm text-slate-500">Carregando suas informações...</p>
-          </div>
-        ) : data ? (
-          <>
-            <article className="rounded-3xl bg-white p-5 shadow-card">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Seus dados cadastrados
-              </h2>
-              <div className="mt-3 grid grid-cols-1 gap-2 text-sm text-slate-600 sm:grid-cols-2">
-                <p><span className="font-medium text-slate-800">Nome:</span> {data.passageiro.nome}</p>
-                <p><span className="font-medium text-slate-800">Documento:</span> {data.passageiro.documento}</p>
-                <p><span className="font-medium text-slate-800">Nascimento:</span> {data.passageiro.data_nascimento}</p>
-                <p><span className="font-medium text-slate-800">Telefone:</span> {data.passageiro.telefone}</p>
-                <p className="sm:col-span-2">
-                  <span className="font-medium text-slate-800">Emergência:</span> {data.passageiro.contato_emergencia}
-                </p>
-              </div>
-            </article>
-
-            <article className="rounded-3xl bg-white p-5 shadow-card">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Suas poltronas
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Viagens em que você foi alocado pelo administrador.
-              </p>
-
-              {data.assentos.length === 0 ? (
-                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                  Você ainda não foi alocado em nenhuma poltrona.
-                </div>
-              ) : (
-                <div className="mt-4 space-y-3">
-                  {data.assentos.map((assento) => (
-                    <div
-                      key={assento.id}
-                      className="rounded-2xl border border-slate-200 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="font-semibold text-slate-900">
-                            {assento.viagem.titulo}
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {assento.viagem.origem} → {assento.viagem.destino}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <span className="block text-2xl font-bold text-slate-900">
-                            {assento.numero}
-                          </span>
-                          <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                            {assento.andar === "inferior" ? "Andar inferior" : "Andar superior"}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-slate-600">
-                        <p>
-                          <span className="font-medium text-slate-800">Partida:</span>{" "}
-                          {new Date(assento.viagem.data_partida).toLocaleString("pt-BR")}
-                        </p>
-                        <p>
-                          <span className="font-medium text-slate-800">Status:</span>{" "}
-                          {assento.viagem.status}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </article>
-          </>
+          <p style={{ fontSize: 13, opacity: .6 }}>Carregando suas informações...</p>
         ) : null}
-      </div>
-    </main>
+
+        {/* Boarding pass */}
+        {upcoming ? (
+          <>
+            <div style={{ border: "1px solid var(--color-text)", background: "var(--color-text)", color: "var(--color-bg)", position: "relative", overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto" }}>
+                <div style={{ padding: "28px 28px 20px", display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 11, letterSpacing: ".16em", textTransform: "uppercase", opacity: .55 }}>Cartão de embarque</span>
+                  <h2 style={{ margin: 0, fontFamily: "var(--font-heading)", fontSize: 22 }}>{upcoming.viagem.titulo}</h2>
+                  <p style={{ margin: 0, fontSize: 13, opacity: .7 }}>{upcoming.viagem.origem} → {upcoming.viagem.destino}</p>
+                  <p style={{ margin: "8px 0 0", fontSize: 12, opacity: .55 }}>Partida · {fmtDate(upcoming.viagem.data_partida)}</p>
+                </div>
+                <div style={{ padding: 28, borderLeft: "1px dashed rgba(255,255,255,.25)", display: "grid", placeItems: "center", gap: 4, textAlign: "center", minWidth: 130 }}>
+                  <span style={{ fontSize: 11, opacity: .55, textTransform: "uppercase", letterSpacing: ".1em" }}>Poltrona</span>
+                  <span style={{ fontSize: 40, fontWeight: 700, lineHeight: 1 }}>{upcoming.numero}</span>
+                  <span className="tag tag-accent">{upcoming.andar === "inferior" ? "Inferior" : "Superior"}</span>
+                </div>
+              </div>
+              <div style={{ borderTop: "1px dashed rgba(255,255,255,.25)", padding: "14px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span className={`tag ${STATUS_TAG[upcoming.viagem.status] || "tag-neutral"}`}>{STATUS_LABELS[upcoming.viagem.status] || upcoming.viagem.status}</span>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+              {tripSteps(upcoming.viagem.status).map((s, i) => (
+                <div key={i} style={{ flex: 1, display: "grid", gap: 6 }}>
+                  <div style={{ height: 3, background: s.color }} />
+                  <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", color: s.textColor }}>{s.label}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : data && !isLoading ? (
+          <div style={{ border: "1px dashed var(--color-divider)", padding: 32, textAlign: "center", fontSize: 14, opacity: .6 }}>
+            Nenhuma poltrona ativa no momento. Aguarde o administrador alocar sua próxima viagem.
+          </div>
+        ) : null}
+
+        {/* Personal data */}
+        {data?.passageiro ? (
+          <div className="card elev-sm" style={{ display: "grid", gap: 12 }}>
+            <div className="card-kicker">Seus dados</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 13 }}>
+              <p style={{ margin: 0 }}><strong>Documento:</strong> {data.passageiro.documento}</p>
+              <p style={{ margin: 0 }}><strong>Nascimento:</strong> {data.passageiro.data_nascimento}</p>
+              <p style={{ margin: 0 }}><strong>Telefone:</strong> {data.passageiro.telefone}</p>
+              <p style={{ margin: 0, gridColumn: "1 / -1" }}><strong>Emergência:</strong> {data.passageiro.contato_emergencia}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {/* History */}
+        {history.length > 0 ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="card-kicker">Histórico</div>
+            {history.map((a) => (
+              <div key={a.id} style={{ border: "1px solid var(--color-divider)", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>{a.viagem.titulo}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, opacity: .6 }}>{a.viagem.origem} → {a.viagem.destino} · {fmtDate(a.viagem.data_partida)}</p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ display: "block", fontSize: 20, fontWeight: 700 }}>{a.numero}</span>
+                  <span className={`tag ${STATUS_TAG[a.viagem.status] || "tag-neutral"}`}>{STATUS_LABELS[a.viagem.status] || a.viagem.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </main>
+    </div>
   );
 }
 

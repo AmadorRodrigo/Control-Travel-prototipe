@@ -9,20 +9,15 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
-    get_password_hash,
     get_token_hash,
     verify_password,
 )
 from app.dependencies import enforce_rate_limit, get_current_user, get_db
-from app.models import Passageiro, RefreshSession, User
-from app.schemas import AuthSessionResponse, FirstAccessRequest, LoginRequest, UserRead
+from app.models import RefreshSession, User
+from app.schemas import AuthSessionResponse, LoginRequest, UserRead
 
 
 router = APIRouter(prefix="/api/auth", tags=["Autenticação"])
-
-# Dummy hash used to prevent timing side-channel when user is not found.
-# Verification will always fail, but takes the same time as a real check.
-_DUMMY_HASH = get_password_hash("dummy-constant-time-placeholder")
 
 
 def set_refresh_cookie(response: Response, refresh_token: str) -> None:
@@ -49,32 +44,12 @@ def clear_refresh_cookie(response: Response) -> None:
     )
 
 
-def _revoke_excess_sessions(user_id: int, db: Session) -> None:
-    now = datetime.now(timezone.utc)
-    active_sessions = (
-        db.query(RefreshSession)
-        .filter(
-            RefreshSession.user_id == user_id,
-            RefreshSession.revoked_at.is_(None),
-            RefreshSession.expires_at > now,
-        )
-        .order_by(RefreshSession.created_at.asc())
-        .all()
-    )
-    excess = len(active_sessions) - settings.max_sessions_per_user + 1
-    if excess > 0:
-        for old_session in active_sessions[:excess]:
-            old_session.revoked_at = now
-
-
 def create_user_session(
     *,
     user: User,
     request: Request,
     db: Session,
 ) -> tuple[str, str]:
-    _revoke_excess_sessions(user.id, db)
-
     refresh_token, refresh_jti, refresh_expires_at = create_refresh_token(
         subject=str(user.id),
         username=user.username,
@@ -88,13 +63,7 @@ def create_user_session(
         expires_at=refresh_expires_at,
     )
     db.add(session)
-
-    access_token = create_access_token(
-        subject=str(user.id),
-        username=user.username,
-        token_version=user.token_version,
-    )
-    return refresh_token, access_token
+    return refresh_token, create_access_token(subject=str(user.id), username=user.username)
 
 
 @router.post("/login", response_model=AuthSessionResponse)
@@ -120,16 +89,9 @@ def login(
         detail="Muitas tentativas para este usuário. Aguarde um minuto e tente novamente.",
     )
 
-    if "@" in payload.username:
-        user = db.query(User).filter(User.email == payload.username).first()
-    else:
-        user = db.query(User).filter(User.username == payload.username).first()
+    user = db.query(User).filter(User.username == payload.username).first()
 
-    # Always run password verification to prevent timing-based user enumeration
-    candidate_hash = user.password_hash if user else _DUMMY_HASH
-    password_ok = verify_password(payload.password, candidate_hash)
-
-    if not user or not password_ok:
+    if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos.",
@@ -240,77 +202,3 @@ def logout(
 @router.get("/me", response_model=UserRead)
 def me(current_user: User = Depends(get_current_user)) -> UserRead:
     return UserRead.model_validate(current_user)
-
-
-@router.post("/setup", response_model=AuthSessionResponse)
-def first_access_setup(
-    payload: FirstAccessRequest,
-    request: Request,
-    response: Response,
-    db: Session = Depends(get_db),
-) -> AuthSessionResponse:
-    client_ip = get_client_ip(request)
-    enforce_rate_limit(
-        key=f"setup:ip:{client_ip}",
-        limit=settings.setup_rate_limit_per_minute,
-        window_seconds=60,
-        detail="Muitas tentativas de configuração. Aguarde um minuto.",
-    )
-    enforce_rate_limit(
-        key=f"setup:doc:{payload.documento}",
-        limit=settings.setup_rate_limit_per_minute,
-        window_seconds=60,
-        detail="Muitas tentativas para este documento. Aguarde um minuto.",
-    )
-
-    # Use a generic error for both "document not found" and "wrong email on existing account"
-    # to prevent document enumeration.
-    _invalid = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Credenciais inválidas. Verifique o documento e o e-mail informados.",
-    )
-
-    passageiro = db.query(Passageiro).filter(Passageiro.documento == payload.documento).first()
-    if not passageiro:
-        # Perform a dummy verify to keep response time consistent
-        verify_password("dummy", _DUMMY_HASH)
-        raise _invalid
-
-    if passageiro.linked_user_id:
-        # Account already exists — validate email matches before resetting password
-        user = db.query(User).filter(User.id == passageiro.linked_user_id).first()
-        if not user or not user.is_active:
-            raise _invalid
-        if user.email.lower() != payload.email.lower():
-            raise _invalid
-        user.password_hash = get_password_hash(payload.new_password)
-        user.token_version = (user.token_version + 1) % 2_147_483_647
-    else:
-        # No account yet — create one and link it
-        if db.query(User).filter(User.email == payload.email).first():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Este e-mail já está vinculado a outra conta.",
-            )
-        username = payload.documento[:50]
-        if db.query(User).filter(User.username == username).first():
-            username = (payload.documento[:46] + payload.email[:3])[:50]
-
-        user = User(
-            username=username,
-            email=payload.email,
-            password_hash=get_password_hash(payload.new_password),
-            is_active=True,
-            is_admin=False,
-        )
-        db.add(user)
-        db.flush()
-        passageiro.linked_user_id = user.id
-
-    refresh_token, access_token = create_user_session(user=user, request=request, db=db)
-    db.commit()
-    set_refresh_cookie(response, refresh_token)
-    return AuthSessionResponse(
-        access_token=access_token,
-        user=UserRead.model_validate(user),
-    )

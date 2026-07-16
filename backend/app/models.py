@@ -23,13 +23,10 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     passageiros: Mapped[list["Passageiro"]] = relationship(
         back_populates="criado_por",
         cascade="all, delete-orphan",
-        foreign_keys="Passageiro.criado_por_user_id",
     )
     viagens: Mapped[list["Viagem"]] = relationship(
         back_populates="criado_por",
@@ -55,10 +52,8 @@ class Passageiro(Base):
     telefone: Mapped[str] = mapped_column(String(30), nullable=False)
     contato_emergencia: Mapped[str] = mapped_column(String(150), nullable=False)
     criado_por_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    linked_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
 
-    criado_por: Mapped["User"] = relationship(back_populates="passageiros", foreign_keys=[criado_por_user_id])
-    linked_user: Mapped["User | None"] = relationship(foreign_keys=[linked_user_id])
+    criado_por: Mapped["User"] = relationship(back_populates="passageiros")
     assentos: Mapped[list["Assento"]] = relationship(back_populates="passageiro")
 
 
