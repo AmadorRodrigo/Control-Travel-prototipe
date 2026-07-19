@@ -1,12 +1,13 @@
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.dependencies import (
@@ -20,6 +21,19 @@ from app.schemas import PassageiroCreate, PassageiroListResponse, PassageiroRead
 
 
 router = APIRouter(prefix="/api/passageiros", tags=["Passageiros"])
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _validate_idempotency_key(key: str | None) -> None:
+    if key and not _UUID_RE.match(key):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Idempotency-Key deve ser um UUID v4 válido.",
+        )
 
 
 def build_passageiro_request_hash(payload: PassageiroCreate) -> str:
@@ -49,6 +63,7 @@ def listar_passageiros(
 
     query = (
         db.query(Passageiro)
+        .options(joinedload(Passageiro.linked_user))
         .filter(Passageiro.criado_por_user_id == current_user.id)
         .order_by(Passageiro.nome.asc())
     )
@@ -78,6 +93,7 @@ def criar_passageiro(
     db: Session = Depends(get_db),
 ) -> PassageiroRead:
     enforce_authenticated_write_rate_limit(request, current_user)
+    _validate_idempotency_key(idempotency_key)
 
     active_idempotency_record = None
     payload_hash = build_passageiro_request_hash(payload)
@@ -198,6 +214,7 @@ def obter_passageiro(
 
     passageiro = (
         db.query(Passageiro)
+        .options(joinedload(Passageiro.linked_user))
         .filter(
             Passageiro.id == passageiro_id,
             Passageiro.criado_por_user_id == current_user.id,
@@ -222,6 +239,7 @@ def atualizar_passageiro(
 
     passageiro = (
         db.query(Passageiro)
+        .options(joinedload(Passageiro.linked_user))
         .filter(
             Passageiro.id == passageiro_id,
             Passageiro.criado_por_user_id == current_user.id,
@@ -234,6 +252,11 @@ def atualizar_passageiro(
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Nenhum campo para atualizar.")
+
+    if "linked_user_id" in updates and updates["linked_user_id"] is not None:
+        linked_user = db.query(User).filter(User.id == updates["linked_user_id"]).first()
+        if not linked_user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     if "documento" in updates and updates["documento"] != passageiro.documento:
         conflito = (
