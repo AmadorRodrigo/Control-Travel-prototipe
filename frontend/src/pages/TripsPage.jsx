@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import AppHeader from "../components/AppHeader";
-import { createTrip, getPassengers, getTripSeats, getTrips, releaseSeat, reserveSeat } from "../services/api";
+import { createTrip, getPassengers, getTripSeats, getTrips, releaseSeat, reserveSeat, updateTrip } from "../services/api";
 
 const STATUS_LABELS = { planejada: "Planejada", confirmada: "Confirmada", embarque: "Embarque", concluida: "Concluída", cancelada: "Cancelada" };
 const STATUS_TAG = { planejada: "tag-neutral", confirmada: "tag-outline", embarque: "tag-accent", concluida: "tag-neutral", cancelada: "tag-outline" };
@@ -14,13 +14,18 @@ function fmtDateTime(iso) {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-const initialTripForm = { titulo: "", origem: "", destino: "", data_partida: "", status: "planejada", capacidade_andar_inferior: 20, capacidade_andar_superior: 16 };
+const initialTripForm = { titulo: "", origem: "", destino: "", data_partida: "", status: "planejada", tipo_veiculo: "onibus", capacidade_andar_inferior: 20, capacidade_andar_superior: 16 };
 
-function buildSeatRows(seatList) {
-  const cols = 4;
+const VEICULO_LABELS = { onibus: "Ônibus", aviao: "Avião", van: "Van" };
+const VEICULO_COLS = { onibus: [2, 2], aviao: [3, 3], van: [2, 0] }; // [left, right] cols per row
+
+function buildSeatRows(seatList, tipoVeiculo = "onibus") {
+  const [left, right] = VEICULO_COLS[tipoVeiculo] || [2, 2];
+  const cols = left + right;
   const rows = [];
   for (let i = 0; i < seatList.length; i += cols) {
-    rows.push(seatList.slice(i, i + cols));
+    const chunk = seatList.slice(i, i + cols);
+    rows.push({ left: chunk.slice(0, left), right: right > 0 ? chunk.slice(left) : [], hasAisle: right > 0 });
   }
   return rows;
 }
@@ -37,6 +42,7 @@ function TripsPage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const [showNewTripDialog, setShowNewTripDialog] = useState(false);
+  const [editingTrip, setEditingTrip] = useState(null);
   const [tripForm, setTripForm] = useState(initialTripForm);
   const [isCreatingTrip, setIsCreatingTrip] = useState(false);
 
@@ -111,21 +117,54 @@ function TripsPage() {
     setTripForm((c) => ({ ...c, [name]: value }));
   }
 
+  function openEditTrip(trip, e) {
+    e.stopPropagation();
+    const localDate = new Date(trip.data_partida);
+    const pad = (n) => String(n).padStart(2, "0");
+    const localIso = `${localDate.getFullYear()}-${pad(localDate.getMonth() + 1)}-${pad(localDate.getDate())}T${pad(localDate.getHours())}:${pad(localDate.getMinutes())}`;
+    setEditingTrip(trip);
+    setTripForm({
+      titulo: trip.titulo,
+      origem: trip.origem,
+      destino: trip.destino,
+      data_partida: localIso,
+      status: trip.status,
+      tipo_veiculo: trip.tipo_veiculo || "onibus",
+      capacidade_andar_inferior: trip.capacidade_andar_inferior,
+      capacidade_andar_superior: trip.capacidade_andar_superior,
+    });
+    setShowNewTripDialog(true);
+  }
+
   async function handleCreateTrip(e) {
     e.preventDefault();
     if (isCreatingTrip) return;
     setIsCreatingTrip(true);
     setErrorMessage("");
     try {
-      const created = await createTrip({
-        ...tripForm,
-        data_partida: new Date(tripForm.data_partida).toISOString(),
-        capacidade_andar_inferior: Number(tripForm.capacidade_andar_inferior),
-        capacidade_andar_superior: Number(tripForm.capacidade_andar_superior),
-      });
-      setTripForm(initialTripForm);
-      setShowNewTripDialog(false);
-      await refreshTrips(created.id);
+      if (editingTrip) {
+        await updateTrip(editingTrip.id, {
+          ...tripForm,
+          data_partida: new Date(tripForm.data_partida).toISOString(),
+          capacidade_andar_inferior: Number(tripForm.capacidade_andar_inferior),
+          capacidade_andar_superior: Number(tripForm.capacidade_andar_superior),
+        });
+        setShowNewTripDialog(false);
+        setEditingTrip(null);
+        setTripForm(initialTripForm);
+        await refreshTrips(editingTrip.id);
+        await refreshSeats();
+      } else {
+        const created = await createTrip({
+          ...tripForm,
+          data_partida: new Date(tripForm.data_partida).toISOString(),
+          capacidade_andar_inferior: Number(tripForm.capacidade_andar_inferior),
+          capacidade_andar_superior: Number(tripForm.capacidade_andar_superior),
+        });
+        setTripForm(initialTripForm);
+        setShowNewTripDialog(false);
+        await refreshTrips(created.id);
+      }
     } catch (e) {
       setErrorMessage(e.message);
     } finally {
@@ -174,9 +213,31 @@ function TripsPage() {
     }
   }
 
+  function renderSeatButton(seat) {
+    return (
+      <button
+        key={seat.id}
+        type="button"
+        title={seat.ocupado ? `Reservado: ${seat.passageiro_nome || ""}` : `Poltrona ${seat.numero}`}
+        onClick={() => handleSeatClick(seat)}
+        style={{
+          width: 52, height: 44,
+          border: `1px solid ${seat.ocupado ? "var(--color-accent-300)" : "var(--color-divider)"}`,
+          background: seat.ocupado ? "var(--color-accent-100)" : "var(--color-neutral-100)",
+          color: "var(--color-text)",
+          fontSize: 13, fontWeight: 700, cursor: "pointer",
+        }}
+      >
+        {seat.numero}
+      </button>
+    );
+  }
+
   function renderSeatGrid(seatList, label) {
+    const tipoVeiculo = selectedTrip?.tipo_veiculo || "onibus";
     const occupied = seatList.filter((s) => s.ocupado).length;
-    const rows = buildSeatRows(seatList);
+    const rows = buildSeatRows(seatList, tipoVeiculo);
+    const [left] = VEICULO_COLS[tipoVeiculo] || [2, 2];
     return (
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, textTransform: "uppercase", letterSpacing: ".1em", opacity: .55 }}>
@@ -186,24 +247,10 @@ function TripsPage() {
         <div style={{ display: "grid", gap: 8 }}>
           {rows.map((row, ri) => (
             <div key={ri} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ width: 20, fontSize: 11, opacity: .4, textAlign: "right" }}>{ri * 4 + 1}</span>
-              {row.map((seat) => (
-                <button
-                  key={seat.id}
-                  type="button"
-                  title={seat.ocupado ? `Reservado: ${seat.passageiro_nome || ""}` : `Poltrona ${seat.numero}`}
-                  onClick={() => handleSeatClick(seat)}
-                  style={{
-                    width: 52, height: 44,
-                    border: `1px solid ${seat.ocupado ? "var(--color-accent-300)" : "var(--color-divider)"}`,
-                    background: seat.ocupado ? "var(--color-accent-100)" : "var(--color-neutral-100)",
-                    color: "var(--color-text)",
-                    fontSize: 13, fontWeight: 700, cursor: "pointer",
-                  }}
-                >
-                  {seat.numero}
-                </button>
-              ))}
+              <span style={{ width: 20, fontSize: 11, opacity: .4, textAlign: "right" }}>{ri * left + 1}</span>
+              {row.left.map((seat) => renderSeatButton(seat))}
+              {row.hasAisle && <span style={{ width: 16 }} />}
+              {row.right.map((seat) => renderSeatButton(seat))}
             </div>
           ))}
         </div>
@@ -231,7 +278,7 @@ function TripsPage() {
             <h1 style={{ fontFamily: "var(--font-heading)", fontSize: 28, margin: 0 }}>Viagens e mapa de assentos</h1>
             <p style={{ fontSize: 13, opacity: .6, margin: "6px 0 0", maxWidth: "60ch" }}>Crie viagens, acompanhe o status de embarque e reserve poltronas por andar.</p>
           </div>
-          <button type="button" className="btn btn-primary" onClick={() => setShowNewTripDialog(true)}>+ Nova viagem</button>
+          <button type="button" className="btn btn-primary" onClick={() => { setEditingTrip(null); setTripForm(initialTripForm); setShowNewTripDialog(true); }}>+ Nova viagem</button>
         </header>
 
         {errorMessage ? (
@@ -280,7 +327,12 @@ function TripsPage() {
                     <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{t.titulo}</h3>
                     <p style={{ margin: "4px 0 0", fontSize: 13, opacity: .65 }}>{t.origem} → {t.destino} · {fmtDateTime(t.data_partida)}</p>
                   </div>
-                  <span className={`tag ${STATUS_TAG[t.status] || "tag-neutral"}`}>{STATUS_LABELS[t.status] || t.status}</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span className="tag tag-outline">{VEICULO_LABELS[t.tipo_veiculo] || t.tipo_veiculo}</span>
+                    <span className={`tag ${STATUS_TAG[t.status] || "tag-neutral"}`}>{STATUS_LABELS[t.status] || t.status}</span>
+                    <button type="button" className="btn btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }}
+                      onClick={(e) => openEditTrip(t, e)}>Editar</button>
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
                   {steps.map((s, i) => <div key={i} style={{ flex: 1, height: 3, background: s.color }} />)}
@@ -328,7 +380,7 @@ function TripsPage() {
       {showNewTripDialog ? (
         <div className="dialog-backdrop">
           <form className="dialog" onSubmit={handleCreateTrip} style={{ maxWidth: 480 }}>
-            <div className="dialog-title">Nova viagem</div>
+            <div className="dialog-title">{editingTrip ? "Editar viagem" : "Nova viagem"}</div>
             <div className="dialog-body" style={{ display: "grid", gap: 12 }}>
               <input className="input" type="text" name="titulo" placeholder="Título — ex: Excursão SP x Curitiba"
                 value={tripForm.titulo} onChange={handleTripFormChange} required />
@@ -347,6 +399,11 @@ function TripsPage() {
                   <option value="embarque">Embarque</option>
                 </select>
               </div>
+              <select className="input" name="tipo_veiculo" value={tripForm.tipo_veiculo} onChange={handleTripFormChange}>
+                <option value="onibus">Ônibus</option>
+                <option value="aviao">Avião</option>
+                <option value="van">Van</option>
+              </select>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <input className="input" type="number" min="0" max="80" name="capacidade_andar_inferior"
                   placeholder="Assentos andar inferior" value={tripForm.capacidade_andar_inferior} onChange={handleTripFormChange} />
@@ -357,7 +414,7 @@ function TripsPage() {
             <div className="dialog-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowNewTripDialog(false)}>Cancelar</button>
               <button type="submit" className="btn btn-primary" disabled={isCreatingTrip}>
-                {isCreatingTrip ? "Criando..." : "Criar viagem"}
+                {isCreatingTrip ? "Salvando..." : editingTrip ? "Salvar alterações" : "Criar viagem"}
               </button>
             </div>
           </form>

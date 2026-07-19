@@ -19,6 +19,7 @@ from app.schemas import (
     ViagemCreate,
     ViagemListResponse,
     ViagemRead,
+    ViagemUpdate,
 )
 
 
@@ -102,6 +103,85 @@ def criar_viagem(
         payload.capacidade_andar_superior,
     ):
         db.add(assento)
+
+    db.commit()
+    db.refresh(viagem)
+    return viagem
+
+
+@router.put("/{viagem_id}", response_model=ViagemRead)
+def atualizar_viagem(
+    viagem_id: int,
+    payload: ViagemUpdate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ViagemRead:
+    enforce_authenticated_write_rate_limit(request, current_user)
+
+    viagem = (
+        db.query(Viagem)
+        .filter(Viagem.id == viagem_id, Viagem.criado_por_user_id == current_user.id)
+        .first()
+    )
+    if not viagem:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Viagem não encontrada.")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    new_inf = data.pop("capacidade_andar_inferior", None)
+    new_sup = data.pop("capacidade_andar_superior", None)
+
+    for field, value in data.items():
+        setattr(viagem, field, value)
+
+    if new_inf is not None and new_inf != viagem.capacidade_andar_inferior:
+        current_inf = viagem.capacidade_andar_inferior
+        if new_inf < current_inf:
+            occupied = db.query(Assento).filter(
+                Assento.viagem_id == viagem_id,
+                Assento.andar == "inferior",
+                Assento.numero > new_inf,
+                Assento.passageiro_id.isnot(None),
+            ).count()
+            if occupied:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Não é possível reduzir: {occupied} assento(s) ocupado(s) seriam removidos.",
+                )
+            db.query(Assento).filter(
+                Assento.viagem_id == viagem_id,
+                Assento.andar == "inferior",
+                Assento.numero > new_inf,
+            ).delete()
+        else:
+            for numero in range(current_inf + 1, new_inf + 1):
+                db.add(Assento(viagem_id=viagem_id, numero=numero, andar="inferior"))
+        viagem.capacidade_andar_inferior = new_inf
+
+    if new_sup is not None and new_sup != viagem.capacidade_andar_superior:
+        current_sup = viagem.capacidade_andar_superior
+        if new_sup < current_sup:
+            occupied = db.query(Assento).filter(
+                Assento.viagem_id == viagem_id,
+                Assento.andar == "superior",
+                Assento.numero > new_sup,
+                Assento.passageiro_id.isnot(None),
+            ).count()
+            if occupied:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Não é possível reduzir: {occupied} assento(s) ocupado(s) seriam removidos.",
+                )
+            db.query(Assento).filter(
+                Assento.viagem_id == viagem_id,
+                Assento.andar == "superior",
+                Assento.numero > new_sup,
+            ).delete()
+        else:
+            for numero in range(current_sup + 1, new_sup + 1):
+                db.add(Assento(viagem_id=viagem_id, numero=numero, andar="superior"))
+        viagem.capacidade_andar_superior = new_sup
 
     db.commit()
     db.refresh(viagem)

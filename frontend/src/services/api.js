@@ -256,6 +256,13 @@ export async function createTrip(payload) {
   });
 }
 
+export async function updateTrip(id, payload) {
+  return request(`/api/viagens/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getTripSeats(viagemId) {
   return request(`/api/viagens/${viagemId}/assentos`, {
     method: "GET",

@@ -123,6 +123,7 @@ class ViagemBase(BaseModel):
     destino: str = Field(min_length=2, max_length=120)
     data_partida: datetime
     status: Literal["planejada", "confirmada", "embarque", "concluida", "cancelada"] = "planejada"
+    tipo_veiculo: Literal["onibus", "aviao", "van"] = "onibus"
     capacidade_andar_inferior: int = Field(default=0, ge=0, le=80)
     capacidade_andar_superior: int = Field(default=0, ge=0, le=80)
     observacoes: str | None = Field(default=None, max_length=1000)
@@ -130,6 +131,18 @@ class ViagemBase(BaseModel):
 
 class ViagemCreate(ViagemBase):
     pass
+
+
+class ViagemUpdate(BaseModel):
+    titulo: str | None = Field(default=None, min_length=3, max_length=150)
+    origem: str | None = Field(default=None, min_length=2, max_length=120)
+    destino: str | None = Field(default=None, min_length=2, max_length=120)
+    data_partida: datetime | None = None
+    status: Literal["planejada", "confirmada", "embarque", "concluida", "cancelada"] | None = None
+    tipo_veiculo: Literal["onibus", "aviao", "van"] | None = None
+    capacidade_andar_inferior: int | None = Field(default=None, ge=0, le=80)
+    capacidade_andar_superior: int | None = Field(default=None, ge=0, le=80)
+    observacoes: str | None = Field(default=None, max_length=1000)
 
 
 class ViagemRead(ViagemBase):

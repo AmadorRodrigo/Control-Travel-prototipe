@@ -71,6 +71,7 @@ class Viagem(Base):
     destino: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     data_partida: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="planejada", index=True)
+    tipo_veiculo: Mapped[str] = mapped_column(String(20), nullable=False, default="onibus")
     capacidade_andar_inferior: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     capacidade_andar_superior: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
