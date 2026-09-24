@@ -1,9 +1,20 @@
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.email import send_password_reset_email
 from app.core.http import get_client_ip
 from app.core.security import (
     create_access_token,
@@ -14,8 +25,17 @@ from app.core.security import (
     verify_password,
 )
 from app.dependencies import enforce_rate_limit, get_current_user, get_db
-from app.models import Passageiro, RefreshSession, User
-from app.schemas import AdminSetupRequest, AuthSessionResponse, FirstAccessRequest, LoginRequest, SetupStatusResponse, UserRead
+from app.models import Passageiro, PasswordResetToken, RefreshSession, User
+from app.schemas import (
+    AdminSetupRequest,
+    AuthSessionResponse,
+    FirstAccessRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    LoginRequest,
+    SetupStatusResponse,
+    UserRead,
+)
 
 
 router = APIRouter(prefix="/api/auth", tags=["Autenticação"])
@@ -121,9 +141,19 @@ def login(
     )
 
     if "@" in payload.username:
-        user = db.query(User).filter(User.email == payload.username).first()
+        user = (
+            db.query(User)
+            .filter(User.email == payload.username)
+            .with_for_update()
+            .first()
+        )
     else:
-        user = db.query(User).filter(User.username == payload.username).first()
+        user = (
+            db.query(User)
+            .filter(User.username == payload.username)
+            .with_for_update()
+            .first()
+        )
 
     # Always run password verification to prevent timing-based user enumeration
     candidate_hash = user.password_hash if user else _DUMMY_HASH
@@ -154,9 +184,12 @@ def login(
 def refresh_session(
     request: Request,
     response: Response,
-    refresh_token: str | None = Cookie(default=None, alias=settings.refresh_cookie_name),
+    refresh_token: str | None = Cookie(
+        default=None, alias=settings.refresh_cookie_name
+    ),
     db: Session = Depends(get_db),
 ) -> AuthSessionResponse:
+    validate_cookie_origin(request)
     if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -182,6 +215,12 @@ def refresh_session(
         .filter(RefreshSession.jti == payload.get("jti"))
         .first()
     )
+    user = None
+    if session:
+        user = (
+            db.query(User).filter(User.id == session.user_id).with_for_update().first()
+        )
+        db.refresh(session)
     now = datetime.now(timezone.utc)
 
     if (
@@ -195,7 +234,6 @@ def refresh_session(
             detail="Sessão de refresh inválida ou revogada.",
         )
 
-    user = db.query(User).filter(User.id == session.user_id).first()
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -203,7 +241,9 @@ def refresh_session(
         )
 
     session.revoked_at = now
-    new_refresh_token, new_access_token = create_user_session(user=user, request=request, db=db)
+    new_refresh_token, new_access_token = create_user_session(
+        user=user, request=request, db=db
+    )
     db.commit()
     set_refresh_cookie(response, new_refresh_token)
     return AuthSessionResponse(
@@ -214,10 +254,14 @@ def refresh_session(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
+    request: Request,
     response: Response,
-    refresh_token: str | None = Cookie(default=None, alias=settings.refresh_cookie_name),
+    refresh_token: str | None = Cookie(
+        default=None, alias=settings.refresh_cookie_name
+    ),
     db: Session = Depends(get_db),
 ) -> Response:
+    validate_cookie_origin(request)
     if refresh_token:
         try:
             payload = decode_token(refresh_token)
@@ -255,6 +299,12 @@ def setup_admin(
     response: Response,
     db: Session = Depends(get_db),
 ) -> AuthSessionResponse:
+    enforce_rate_limit(
+        key=f"setup-admin:ip:{get_client_ip(request)}",
+        limit=settings.setup_rate_limit_per_minute,
+        window_seconds=60,
+        detail="Muitas tentativas de configuração. Aguarde um minuto.",
+    )
     has_admin = db.query(User).filter(User.is_admin.is_(True)).first() is not None
     if has_admin:
         raise HTTPException(
@@ -262,9 +312,11 @@ def setup_admin(
             detail="Já existe um administrador cadastrado.",
         )
 
-    if db.query(User).filter(
-        (User.username == payload.username) | (User.email == payload.email)
-    ).first():
+    if (
+        db.query(User)
+        .filter((User.username == payload.username) | (User.email == payload.email))
+        .first()
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Usuário ou e-mail já cadastrado.",
@@ -280,7 +332,9 @@ def setup_admin(
     db.add(admin)
     db.flush()
 
-    refresh_token, access_token = create_user_session(user=admin, request=request, db=db)
+    refresh_token, access_token = create_user_session(
+        user=admin, request=request, db=db
+    )
     db.commit()
     set_refresh_cookie(response, refresh_token)
     return AuthSessionResponse(
@@ -317,21 +371,20 @@ def first_access_setup(
         detail="Credenciais inválidas. Verifique o documento e o e-mail informados.",
     )
 
-    passageiro = db.query(Passageiro).filter(Passageiro.documento == payload.documento).first()
+    passageiro = (
+        db.query(Passageiro)
+        .filter(Passageiro.documento == payload.documento)
+        .with_for_update()
+        .first()
+    )
     if not passageiro:
         # Perform a dummy verify to keep response time consistent
         verify_password("dummy", _DUMMY_HASH)
         raise _invalid
 
     if passageiro.linked_user_id:
-        # Account already exists — validate email matches before resetting password
-        user = db.query(User).filter(User.id == passageiro.linked_user_id).first()
-        if not user or not user.is_active:
-            raise _invalid
-        if user.email.lower() != payload.email.lower():
-            raise _invalid
-        user.password_hash = get_password_hash(payload.new_password)
-        user.token_version = (user.token_version + 1) % 2_147_483_647
+        # Existing accounts must prove ownership through email recovery.
+        raise _invalid
     else:
         # No account yet — create one and link it
         if db.query(User).filter(User.email == payload.email).first():
@@ -361,3 +414,119 @@ def first_access_setup(
         access_token=access_token,
         user=UserRead.model_validate(user),
     )
+
+
+def validate_cookie_origin(request: Request) -> None:
+    # Required when cross-site deployments use SameSite=None. CORS alone does
+    # not stop browsers from sending a request whose response is unreadable.
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in settings.cors_origins_list:
+        raise HTTPException(status_code=403, detail="Origem não autorizada.")
+    if origin is None and (
+        settings.cookie_samesite == "none"
+        or request.headers.get("sec-fetch-site") == "cross-site"
+    ):
+        raise HTTPException(status_code=403, detail="Origem não autorizada.")
+
+
+def limit_password_recovery(request: Request, action: str) -> None:
+    enforce_rate_limit(
+        key=f"{action}:ip:{get_client_ip(request)}",
+        limit=settings.password_reset_rate_limit_per_minute,
+        window_seconds=60,
+        detail="Muitas tentativas. Aguarde um minuto e tente novamente.",
+    )
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    limit_password_recovery(request, "forgot-password")
+    enforce_rate_limit(
+        key=f"forgot-password:email:{get_token_hash(payload.email.lower())}",
+        limit=settings.password_reset_rate_limit_per_minute,
+        window_seconds=60,
+        detail="Muitas tentativas. Aguarde um minuto e tente novamente.",
+    )
+    user = (
+        db.query(User)
+        .filter(User.email == payload.email, User.is_active.is_(True))
+        .with_for_update()
+        .first()
+    )
+    if user:
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        db.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=get_token_hash(token),
+                expires_at=now
+                + timedelta(minutes=settings.password_reset_expire_minutes),
+            )
+        )
+        db.commit()
+        # Send after responding so SMTP latency cannot reveal account existence.
+        background_tasks.add_task(send_password_reset_email, user.email, token)
+    return {
+        "message": "Se o e-mail estiver cadastrado, você receberá um link para redefinir sua senha."
+    }
+
+
+@router.post("/reset-password")
+def reset_password(
+    payload: ResetPasswordRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    limit_password_recovery(request, "reset-password")
+    invalid = HTTPException(
+        status_code=400, detail="Link inválido ou expirado. Solicite um novo link."
+    )
+    token_hash = get_token_hash(payload.token)
+    candidate = (
+        db.query(PasswordResetToken)
+        .filter(PasswordResetToken.token_hash == token_hash)
+        .first()
+    )
+    if not candidate:
+        raise invalid
+    # Lock the user first to serialize resets (including different tokens),
+    # logins and refreshes. Then reload the token after acquiring the lock.
+    user = db.query(User).filter(User.id == candidate.user_id).with_for_update().first()
+    reset_token = (
+        db.query(PasswordResetToken)
+        .filter(
+            PasswordResetToken.id == candidate.id,
+        )
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+    now = datetime.now(timezone.utc)
+    if (
+        not user
+        or not user.is_active
+        or not reset_token
+        or reset_token.used_at
+        or reset_token.expires_at <= now
+    ):
+        raise invalid
+    user.password_hash = get_password_hash(payload.new_password)
+    user.token_version = (user.token_version + 1) % 2_147_483_647
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
+    db.query(RefreshSession).filter(
+        RefreshSession.user_id == user.id,
+        RefreshSession.revoked_at.is_(None),
+    ).update({RefreshSession.revoked_at: now}, synchronize_session=False)
+    db.commit()
+    clear_refresh_cookie(response)
+    return {"message": "Senha redefinida. Faça login com sua nova senha."}

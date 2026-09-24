@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { getSetupStatus } from "../services/api";
+import { forgotPasswordRequest, getSetupStatus } from "../services/api";
 
 function LoginPage() {
   const { login, setup, setupAdmin, isAuthenticated, isLoading, user } = useAuth();
+
+  const location = useLocation();
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryMessage, setRecoveryMessage] = useState("");
+  const [isRecovering, setIsRecovering] = useState(false);
 
   const [needsSetup, setNeedsSetup] = useState(null); // null = checking
   const [mode, setMode] = useState("login"); // "login" | "first-access"
@@ -36,6 +41,22 @@ function LoginPage() {
   function handleAdminChange(e) {
     const { name, value } = e.target;
     setAdminForm((c) => ({ ...c, [name]: value }));
+  }
+
+  async function handleForgotSubmit(e) {
+    e.preventDefault();
+    if (isRecovering) return;
+    setIsRecovering(true);
+    setErrorMessage("");
+    setRecoveryMessage("");
+    try {
+      const result = await forgotPasswordRequest(recoveryEmail);
+      setRecoveryMessage(result.message);
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsRecovering(false);
+    }
   }
 
   async function handleLoginSubmit(e) {
@@ -152,14 +173,14 @@ function LoginPage() {
               <div className="field">
                 <label htmlFor="adm-password">Senha</label>
                 <input className="input" id="adm-password" type="password" name="password"
-                  placeholder="Mínimo 6 caracteres" value={adminForm.password} onChange={handleAdminChange}
-                  autoComplete="new-password" required minLength={6} />
+                  placeholder="8+ caracteres, maiúscula, minúscula e número" value={adminForm.password} onChange={handleAdminChange}
+                  autoComplete="new-password" required minLength={8} maxLength={128} />
               </div>
               <div className="field">
                 <label htmlFor="adm-confirm">Confirmar senha</label>
                 <input className="input" id="adm-confirm" type="password" name="confirm"
                   placeholder="Repita a senha" value={adminForm.confirm} onChange={handleAdminChange}
-                  autoComplete="new-password" required minLength={6} />
+                  autoComplete="new-password" required minLength={8} maxLength={128} />
               </div>
 
               {errorMessage ? (
@@ -233,7 +254,26 @@ function LoginPage() {
             </label>
           </div>
 
-          {mode === "login" ? (
+          {location.state?.passwordReset && mode === "login" ? (
+            <p role="status">Senha redefinida. Faça login com sua nova senha.</p>
+          ) : null}
+          {mode === "forgot" ? (
+            <form style={{ display: "grid", gap: 16 }} onSubmit={handleForgotSubmit}>
+              <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 22, margin: 0 }}>Recuperar senha</h2>
+              <p>Informe seu e-mail para receber um link de redefinição.</p>
+              <div className="field">
+                <label htmlFor="recovery-email">E-mail</label>
+                <input className="input" id="recovery-email" type="email" required maxLength={255}
+                  autoComplete="email" value={recoveryEmail} onChange={(e) => setRecoveryEmail(e.target.value)} />
+              </div>
+              {recoveryMessage ? <p role="status">{recoveryMessage}</p> : null}
+              {errorMessage ? <p role="alert">{errorMessage}</p> : null}
+              <button className="btn btn-primary btn-block" disabled={isRecovering} type="submit">
+                {isRecovering ? "Enviando..." : "Enviar link"}
+              </button>
+              <button className="btn" type="button" onClick={() => { setMode("login"); setErrorMessage(""); }}>Voltar para entrar</button>
+            </form>
+          ) : mode === "login" ? (
             <form style={{ display: "grid", gap: 16 }} onSubmit={handleLoginSubmit}>
               <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 22, margin: 0 }}>Acesse sua conta</h2>
               <div className="field">
@@ -256,12 +296,15 @@ function LoginPage() {
               <button type="submit" className="btn btn-primary btn-block" disabled={isLoading}>
                 {isLoading ? "Entrando..." : "Entrar"}
               </button>
+              <button className="btn" type="button" onClick={() => { setMode("forgot"); setErrorMessage(""); setRecoveryMessage(""); }}>
+                Esqueci minha senha
+              </button>
             </form>
           ) : (
             <form style={{ display: "grid", gap: 16 }} onSubmit={handleSetupSubmit}>
               <h2 style={{ fontFamily: "var(--font-heading)", fontSize: 22, margin: 0 }}>Primeiro acesso</h2>
               <p style={{ fontSize: 13, opacity: .6, margin: 0 }}>
-                Informe o documento cadastrado pelo administrador, seu e-mail e defina uma senha.
+                Informe o documento cadastrado pelo administrador, seu e-mail e defina uma senha. Se já possui conta, use “Esqueci minha senha”.
               </p>
               <div className="field">
                 <label htmlFor="ct-doc">Documento (RG, CPF ou passaporte)</label>
@@ -278,14 +321,14 @@ function LoginPage() {
               <div className="field">
                 <label htmlFor="ct-pass1">Nova senha</label>
                 <input className="input" id="ct-pass1" type="password" name="new_password"
-                  placeholder="Mínimo 6 caracteres" value={setupForm.new_password} onChange={handleSetupChange}
-                  autoComplete="new-password" required minLength={6} />
+                  placeholder="8+ caracteres, maiúscula, minúscula e número" value={setupForm.new_password} onChange={handleSetupChange}
+                  autoComplete="new-password" required minLength={8} maxLength={128} />
               </div>
               <div className="field">
                 <label htmlFor="ct-pass2">Confirmar senha</label>
                 <input className="input" id="ct-pass2" type="password" name="confirm"
                   placeholder="Repita a senha" value={setupForm.confirm} onChange={handleSetupChange}
-                  autoComplete="new-password" required minLength={6} />
+                  autoComplete="new-password" required minLength={8} maxLength={128} />
               </div>
               {errorMessage ? (
                 <div style={{ background: "var(--color-accent-100)", color: "var(--color-accent-800)", padding: "12px 16px", fontSize: 13 }}>

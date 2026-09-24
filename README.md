@@ -75,14 +75,13 @@ Boilerplate full stack para controle de viagens sem venda, cadastro de viajantes
 
 ## Como subir em produção
 
-1. Revise `.env` com `ENABLE_DOCS=false` e `COOKIE_SECURE=true` se estiver usando HTTPS.
+1. Siga [DEPLOYMENT.md](DEPLOYMENT.md) para configurar HTTPS obrigatório, SMTP, CORS, cookies, migrations e cache.
 2. Execute `docker compose -f docker-compose.prod.yml up --build -d`.
 3. O frontend sobe em `Nginx` e faz proxy de `/api` para o backend.
 
 ## Credenciais iniciais
 
-- Usuário: valor de `DEFAULT_ADMIN_USERNAME`
-- Senha: valor de `DEFAULT_ADMIN_PASSWORD`
+Crie o administrador na tela de setup antes de expor o serviço. As variáveis `DEFAULT_ADMIN_*` não criam automaticamente essa conta.
 
 ## O que é Alembic
 
@@ -127,12 +126,12 @@ Na prática, ele resolve problemas como:
 - `POST /api/auth/logout`: revoga a sessão de refresh atual.
 - `GET /api/passageiros` e `GET /api/viagens`: limites por usuário e IP.
 - `POST /api/passageiros`: idempotência + `unique constraint` em `documento`.
-- `POST /api/viagens/{id}/assentos/reservar`: trava otimista via banco para evitar corrida de reserva.
+- `POST /api/viagens/{id}/assentos/reservar`: trava de linha via banco para evitar corrida de reserva.
 - Frontend com bloqueio de múltiplos envios em login, cadastro e reserva.
 
 ## Baixo custo em produção
 
-- O `rate limit` atual é em memória, ideal para uma única instância e baixo custo.
+- O `rate limit` atual é em memória, limitado a um único worker e uma única instância e baixo custo.
 - Se houver escala horizontal, migre o limitador para `Redis`.
 - O frontend de produção usa `Nginx` estático, reduzindo consumo de CPU e memória.
 - O backend usa `gunicorn` com `uvicorn worker`, suficiente para cargas iniciais pequenas e médias.
@@ -140,8 +139,12 @@ Na prática, ele resolve problemas como:
 
 ## Próximas evoluções recomendadas
 
-- Adicionar testes automatizados de API e interface.
+- Executar os testes isolados documentados em [DEPLOYMENT.md](DEPLOYMENT.md) antes de cada deploy.
 - Incluir `Redis` ao escalar para múltiplas réplicas.
 - Criar trilha de auditoria por reserva, remarcação e cancelamento.
 - Implementar refresh token por dispositivo, com tela de sessões ativas.
 - Adicionar observabilidade com métricas, tracing e alertas.
+
+## Recuperação de senha e produção
+
+O login oferece **Esqueci minha senha**. Configure SMTP e `RESET_PASSWORD_URL` para enviar links de uso único. Senhas novas exigem 8 caracteres, maiúscula, minúscula e número; contas já vinculadas devem usar recuperação por e-mail. Veja [DEPLOYMENT.md](DEPLOYMENT.md) para comandos, variáveis, limitações de hospedagem e testes.

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -8,7 +10,7 @@ from app.dependencies import (
     get_db,
     require_admin,
 )
-from app.models import User
+from app.models import PasswordResetToken, RefreshSession, User
 from app.schemas import UserCreate, UserListResponse, UserRead, UserUpdate
 
 
@@ -36,9 +38,14 @@ def criar_usuario(
     enforce_authenticated_write_rate_limit(request, current_user)
 
     if db.query(User).filter(User.username == payload.username).first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nome de usuário já está em uso.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Nome de usuário já está em uso.",
+        )
     if db.query(User).filter(User.email == payload.email).first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="E-mail já está em uso.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="E-mail já está em uso."
+        )
 
     user = User(
         username=payload.username,
@@ -63,26 +70,54 @@ def atualizar_usuario(
 ) -> UserRead:
     enforce_authenticated_write_rate_limit(request, current_user)
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado."
+        )
 
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Nenhum campo para atualizar.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Nenhum campo para atualizar.",
+        )
 
     if "username" in updates and updates["username"] != user.username:
         if db.query(User).filter(User.username == updates["username"]).first():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nome de usuário já está em uso.")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Nome de usuário já está em uso.",
+            )
 
     if "email" in updates and updates["email"] != user.email:
         if db.query(User).filter(User.email == updates["email"]).first():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="E-mail já está em uso.")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="E-mail já está em uso."
+            )
+
+    if updates.get("password") is None:
+        updates.pop("password", None)
 
     if "password" in updates:
         user.password_hash = get_password_hash(updates.pop("password"))
         # Invalidate all existing access tokens for this user
         user.token_version = (user.token_version + 1) % 2_147_483_647
+        now = datetime.now(timezone.utc)
+        db.query(RefreshSession).filter(
+            RefreshSession.user_id == user.id,
+            RefreshSession.revoked_at.is_(None),
+        ).update({RefreshSession.revoked_at: now}, synchronize_session=False)
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
 
     for field, value in updates.items():
         setattr(user, field, value)
@@ -102,11 +137,16 @@ def deletar_usuario(
     enforce_authenticated_write_rate_limit(request, current_user)
 
     if user_id == current_user.id:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Não é possível excluir o próprio usuário.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Não é possível excluir o próprio usuário.",
+        )
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado."
+        )
 
     db.delete(user)
     db.commit()

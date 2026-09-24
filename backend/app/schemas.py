@@ -1,7 +1,33 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+
+
+def validate_password_strength(value: str) -> str:
+    if not (
+        any(c.isupper() for c in value)
+        and any(c.islower() for c in value)
+        and any(c.isdigit() for c in value)
+    ):
+        raise ValueError(
+            "A senha deve conter uma letra maiúscula, uma minúscula e um número."
+        )
+    return value
+
+
+StrongPassword = Annotated[
+    str, Field(min_length=8, max_length=128), AfterValidator(validate_password_strength)
+]
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr = Field(max_length=255)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
+    new_password: StrongPassword
 
 
 class TokenResponse(BaseModel):
@@ -12,14 +38,14 @@ class TokenResponse(BaseModel):
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     email: EmailStr
-    password: str = Field(min_length=6, max_length=128)
+    password: StrongPassword
     # is_admin intentionally omitted — admin status is set only via PUT by an existing admin
 
 
 class UserUpdate(BaseModel):
     username: str | None = Field(default=None, min_length=3, max_length=50)
     email: EmailStr | None = None
-    password: str | None = Field(default=None, min_length=6, max_length=128)
+    password: StrongPassword | None = None
     is_active: bool | None = None
     is_admin: bool | None = None
 
@@ -32,7 +58,7 @@ class LoginRequest(BaseModel):
 class FirstAccessRequest(BaseModel):
     documento: str = Field(min_length=5, max_length=50)
     email: EmailStr
-    new_password: str = Field(min_length=6, max_length=128)
+    new_password: StrongPassword
 
 
 class UserRead(BaseModel):
@@ -122,7 +148,9 @@ class ViagemBase(BaseModel):
     origem: str = Field(min_length=2, max_length=120)
     destino: str = Field(min_length=2, max_length=120)
     data_partida: datetime
-    status: Literal["planejada", "confirmada", "embarque", "concluida", "cancelada"] = "planejada"
+    status: Literal["planejada", "confirmada", "embarque", "concluida", "cancelada"] = (
+        "planejada"
+    )
     tipo_veiculo: Literal["onibus", "aviao", "van"] = "onibus"
     capacidade_andar_inferior: int = Field(default=0, ge=0, le=80)
     capacidade_andar_superior: int = Field(default=0, ge=0, le=80)
@@ -138,7 +166,9 @@ class ViagemUpdate(BaseModel):
     origem: str | None = Field(default=None, min_length=2, max_length=120)
     destino: str | None = Field(default=None, min_length=2, max_length=120)
     data_partida: datetime | None = None
-    status: Literal["planejada", "confirmada", "embarque", "concluida", "cancelada"] | None = None
+    status: (
+        Literal["planejada", "confirmada", "embarque", "concluida", "cancelada"] | None
+    ) = None
     tipo_veiculo: Literal["onibus", "aviao", "van"] | None = None
     capacidade_andar_inferior: int | None = Field(default=None, ge=0, le=80)
     capacidade_andar_superior: int | None = Field(default=None, ge=0, le=80)
@@ -177,7 +207,7 @@ class MinhaPoltronaResponse(BaseModel):
 class AdminSetupRequest(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     email: EmailStr
-    password: str = Field(min_length=6, max_length=128)
+    password: StrongPassword
 
 
 class SetupStatusResponse(BaseModel):

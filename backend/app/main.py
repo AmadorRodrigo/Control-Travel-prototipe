@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import Response
 
 from app.core.config import settings, validate_settings
+from app.core.maintenance import cleanup_expired_records, run_maintenance
 from app.routes.auth import router as auth_router
 from app.routes.me import router as me_router
 from app.routes.passageiros import router as passageiros_router
@@ -17,16 +19,29 @@ from app.routes.viagens import router as viagens_router
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_settings()
-    yield
+    await asyncio.to_thread(cleanup_expired_records)
+    maintenance = asyncio.create_task(run_maintenance())
+    try:
+        yield
+    finally:
+        maintenance.cancel()
+        with suppress(asyncio.CancelledError):
+            await maintenance
 
 
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs" if settings.enable_docs else None,
-    redoc_url="/redoc" if settings.enable_docs else None,
-    openapi_url="/openapi.json" if settings.enable_docs else None,
+    docs_url="/docs"
+    if settings.enable_docs and settings.app_env != "production"
+    else None,
+    redoc_url="/redoc"
+    if settings.enable_docs and settings.app_env != "production"
+    else None,
+    openapi_url="/openapi.json"
+    if settings.enable_docs and settings.app_env != "production"
+    else None,
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=512)
@@ -50,14 +65,13 @@ async def add_security_headers(request: Request, call_next) -> Response:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
-        "connect-src 'self'; "
-        "frame-ancestors 'none';"
-    )
+    # The HTML host owns the frontend CSP; an API policy cannot control the SPA.
+    if request.url.path.startswith("/api/"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'"
+        )
+    if request.url.path.startswith("/api/auth/"):
+        response.headers["Cache-Control"] = "no-store"
     if settings.app_env == "production":
         response.headers["Strict-Transport-Security"] = (
             "max-age=63072000; includeSubDomains; preload"

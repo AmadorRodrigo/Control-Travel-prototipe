@@ -172,8 +172,8 @@ function UsersPage() {
               <input className="input" type="email" name="email" placeholder="E-mail"
                 value={formData.email} onChange={handleChange} required />
               <input className="input" type="password" name="password"
-                placeholder={editingUser ? "Nova senha (deixe em branco para manter)" : "Senha"}
-                value={formData.password} onChange={handleChange} required={!editingUser} minLength={6} />
+                placeholder={editingUser ? "Nova senha (deixe em branco para manter)" : "8+ caracteres, maiúscula, minúscula e número"}
+                value={formData.password} onChange={handleChange} required={!editingUser} minLength={8} maxLength={128} />
               <label style={{ border: "1px solid var(--color-divider)", padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, fontSize: 14 }}>
                 <input type="checkbox" name="is_admin" checked={formData.is_admin} onChange={handleChange} />
                 Administrador — acesso completo ao sistema

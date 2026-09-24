@@ -32,6 +32,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-travel_user}:${POSTGRES_PASSWORD:-travel_password}@postgres:5432/${POSTGRES_DB:-travel_manager}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       APP_ENV: ${APP_ENV:-development}
     ports:
       - "${BACKEND_PORT:-8000}:8000"

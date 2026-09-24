@@ -281,3 +281,20 @@ export async function releaseSeat(viagemId, assentoId) {
     method: "DELETE",
   });
 }
+
+
+export function forgotPasswordRequest(email) {
+  return request("/api/auth/forgot-password", {
+    method: "POST", includeAuth: false, retryOnAuth: false,
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPasswordRequest(token, newPassword) {
+  const response = await request("/api/auth/reset-password", {
+    method: "POST", includeAuth: false, retryOnAuth: false,
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+  setStoredAccessToken(null);
+  return response;
+}

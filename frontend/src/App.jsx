@@ -1,12 +1,15 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
-import LoginPage from "./pages/LoginPage";
-import MySeatsPage from "./pages/MySeatsPage";
-import PassengersPage from "./pages/PassengersPage";
-import AssignPage from "./pages/AssignPage";
-import TripsPage from "./pages/TripsPage";
-import UsersPage from "./pages/UsersPage";
+
+const LoginPage = lazy(() => import("./pages/LoginPage"));
+const MySeatsPage = lazy(() => import("./pages/MySeatsPage"));
+const PassengersPage = lazy(() => import("./pages/PassengersPage"));
+const AssignPage = lazy(() => import("./pages/AssignPage"));
+const TripsPage = lazy(() => import("./pages/TripsPage"));
+const UsersPage = lazy(() => import("./pages/UsersPage"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 
 function AdminRoute({ children }) {
   const { user, isInitializing } = useAuth();
@@ -37,50 +40,53 @@ function SmartRedirect() {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="/viagens"
-        element={
-          <AdminRoute>
-            <TripsPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/passageiros"
-        element={
-          <AdminRoute>
-            <PassengersPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/usuarios"
-        element={
-          <AdminRoute>
-            <UsersPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/vinculos"
-        element={
-          <AdminRoute>
-            <AssignPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/minha-poltrona"
-        element={
-          <ProtectedRoute>
-            <MySeatsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="*" element={<SmartRedirect />} />
-    </Routes>
+    <Suspense fallback={<main role="status" style={{ padding: 32 }}>Carregando...</main>}>
+      <Routes>
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/viagens"
+          element={
+            <AdminRoute>
+              <TripsPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/passageiros"
+          element={
+            <AdminRoute>
+              <PassengersPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/usuarios"
+          element={
+            <AdminRoute>
+              <UsersPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/vinculos"
+          element={
+            <AdminRoute>
+              <AssignPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/minha-poltrona"
+          element={
+            <ProtectedRoute>
+              <MySeatsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<SmartRedirect />} />
+      </Routes>
+    </Suspense>
   );
 }
 
