@@ -8,8 +8,8 @@ from app.core.config import settings
 from app.dependencies import (
     enforce_authenticated_read_rate_limit,
     enforce_authenticated_write_rate_limit,
-    get_current_user,
     get_db,
+    require_admin,
 )
 from app.models import Assento, Passageiro, User, Viagem
 from app.schemas import (
@@ -43,7 +43,7 @@ def listar_viagens(
     request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=settings.default_page_size, ge=1),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ViagemListResponse:
     enforce_authenticated_read_rate_limit(request, current_user)
@@ -78,7 +78,7 @@ def listar_viagens(
 def criar_viagem(
     payload: ViagemCreate,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ViagemRead:
     enforce_authenticated_write_rate_limit(request, current_user)
@@ -114,7 +114,7 @@ def atualizar_viagem(
     viagem_id: int,
     payload: ViagemUpdate,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> ViagemRead:
     enforce_authenticated_write_rate_limit(request, current_user)
@@ -192,7 +192,7 @@ def atualizar_viagem(
 def listar_assentos_por_viagem(
     viagem_id: int,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> list[AssentoRead]:
     enforce_authenticated_read_rate_limit(request, current_user)
@@ -220,7 +220,7 @@ def reservar_assento(
     viagem_id: int,
     payload: ReservaAssentoRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> AssentoRead:
     enforce_authenticated_write_rate_limit(request, current_user)
@@ -286,7 +286,7 @@ def liberar_assento(
     viagem_id: int,
     assento_id: int,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> AssentoRead:
     enforce_authenticated_write_rate_limit(request, current_user)

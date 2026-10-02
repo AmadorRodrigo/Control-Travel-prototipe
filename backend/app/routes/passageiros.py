@@ -13,8 +13,8 @@ from app.core.config import settings
 from app.dependencies import (
     enforce_authenticated_read_rate_limit,
     enforce_authenticated_write_rate_limit,
-    get_current_user,
     get_db,
+    require_admin,
 )
 from app.models import IdempotencyKey, Passageiro, User
 from app.schemas import PassageiroCreate, PassageiroListResponse, PassageiroRead, PassageiroUpdate, PaginationMeta
@@ -50,7 +50,7 @@ def listar_passageiros(
     request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=settings.default_page_size, ge=1),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> PassageiroListResponse:
     enforce_authenticated_read_rate_limit(request, current_user)
@@ -89,7 +89,7 @@ def criar_passageiro(
     request: Request,
     response: Response,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> PassageiroRead:
     enforce_authenticated_write_rate_limit(request, current_user)
@@ -207,7 +207,7 @@ def criar_passageiro(
 def obter_passageiro(
     passageiro_id: int,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> PassageiroRead:
     enforce_authenticated_read_rate_limit(request, current_user)
@@ -232,7 +232,7 @@ def atualizar_passageiro(
     passageiro_id: int,
     payload: PassageiroUpdate,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> PassageiroRead:
     enforce_authenticated_write_rate_limit(request, current_user)
@@ -282,7 +282,7 @@ def atualizar_passageiro(
 def deletar_passageiro(
     passageiro_id: int,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> None:
     enforce_authenticated_write_rate_limit(request, current_user)
